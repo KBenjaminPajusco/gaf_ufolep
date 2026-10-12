@@ -1,4 +1,4 @@
-# Palier — enchaînements GAF UFOLEP
+# Mes Enchaînements — GAF / GAM UFOLEP
 
 En ligne : https://benjamin.pajusco.fr/gaf_ufolep/ (GitHub Pages, déployé par .github/workflows/pages.yml à chaque push sur main).
 
@@ -20,7 +20,10 @@ hébergeable n'importe où (GitHub Pages, Netlify…) ; `server.py` sert juste �
 
 ## Contenu
 
-- `app/elements.json` : 414 éléments extraits des arches de la brochure (agrès, arche, secteur, palier, n°, page).
+- `app/elements.json` : 678 éléments extraits des arches (GAF : brochure du 29/09/2026 ; GAM : documents anneaux,
+  barres parallèles, barre fixe « en cours de validation » de juil.-août 2026). Sol et saut sont mixtes GAF/GAM.
+- GAM : règles d'après le document de travail « Valorisations GAM » du 10/10/2026 (programme GAM officiel « à venir ») ;
+  arçons sans catalogue (document sans noms de mouvements), barre fixe sans barème publié.
 - `app/rules.js` : paliers autorisés/valorisables, tronc commun et valorisations par agrès et niveau (p. 26-32).
 - `app/app.js` : catalogue, enchaînement, moteur de note (TC 1 pt/exigence, valorisations 3 pts (*) / 2 pts,
   « 4 parmi 5/6 » en B/C, éléments distincts entre valorisations, fautes automatiques + compteur de fautes).

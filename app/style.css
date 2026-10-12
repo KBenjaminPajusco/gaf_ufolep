@@ -564,3 +564,23 @@ body.on-recap .nav-btn.back, body.on-recap .ctxbar { display: none; }
 .dl-man { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 6px; border-top: 1px solid var(--line); }
 .dl-man .seg button { font-size: 12px; padding: 7px 9px; }
 
+
+/* ---------- GAM ---------- */
+:root { --arcons: #2f9e6a; --anneaux: #7a4fc9; --paralleles: #0f8fa3; --fixe: #4a5bd1; }
+.dtiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ctile small { display: block; margin-top: 6px; font: 500 12px/1.2 var(--f-body); text-transform: none; letter-spacing: 0; opacity: .8; }
+.ctiles.six { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ctiles.six .ctile { font-size: 17px; padding: 14px 4px; }
+.gam-note { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); font-size: 13px; line-height: 1.4; }
+@media (max-width: 480px) { .ctiles.six { grid-template-columns: repeat(2, 1fr); } }
+
+
+/* suggestions à ajouter depuis le détail d une exigence */
+.sg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sg-el { width: 100%; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 10px; align-items: center; text-align: left; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: inherit; cursor: pointer; }
+.sg-el:hover, .sg-el:focus-visible { border-color: var(--app); background: color-mix(in srgb, var(--app) 6%, var(--surface)); }
+.sg-el img { width: 64px; height: 40px; object-fit: contain; background: #fff; border-radius: 6px; border: 1px solid var(--line); }
+.sg-el b { display: block; font-weight: 600; font-size: 14px; line-height: 1.3; }
+.sg-el small { display: block; color: var(--muted); font-size: 12px; }
+.sg-add { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--app); color: #fff; font-size: 20px; line-height: 1; }
+

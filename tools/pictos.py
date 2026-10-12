@@ -10,7 +10,8 @@ sys.path.insert(0, "tools")
 
 raw = json.load(open("tools/raw.json", encoding="utf-8"))
 els = json.load(open("app/elements.json", encoding="utf-8"))
-doc = pymupdf.open("source/gaf_pt.pdf")
+PDF = {"gaf": "source/gaf_pt.pdf", "anneaux": "source/gam_anneaux.pdf", "paralleles": "source/gam_parallele.pdf", "fixe": "source/gam_fixe.pdf"}
+DOCS = {k: pymupdf.open(v) for k, v in PDF.items()}
 # raw et elements sont dans le même ordre (build_data ajoute seulement le PR3 synthétique à la fin)
 pairs = list(zip(raw, els))
 Z = 4  # 288 dpi
@@ -26,9 +27,9 @@ def rect_dist(u, v, e):
 
 import os; os.makedirs("app/img", exist_ok=True)
 stats = {"ok": 0, "none": 0}
-for pn in sorted({r["page"] for r in raw}):
-    page = doc[pn - 1]
-    labels = [(r, el) for r, el in pairs if r["page"] == pn]
+for src, pn in sorted({(r["src"], r["page"]) for r in raw}):
+    page = DOCS[src][pn - 1]
+    labels = [(r, el) for r, el in pairs if r["page"] == pn and r["src"] == src]
     groups = {el["id"]: [] for _, el in labels}
     for dr in page.get_drawings():
         R = dr["rect"]
@@ -74,12 +75,12 @@ for pn in sorted({r["page"] for r in raw}):
         hu0, hu1 = min(u0, r["u0"] - 2), max(u1, r["u1"] + 2)
         hv0, hv1 = min(v0, r["v0"] - 2), max(v1, r["v1"] + 2)
         uc, vc = (hu0 + hu1) / 2, (hv0 + hv1) / 2
-        el["hs"] = [pn, round(r["fx"] + uc * dx + vc * nx, 1), round(r["fy"] + uc * dy + vc * ny, 1),
+        el["hs"] = [f"{src}-{pn}", round(r["fx"] + uc * dx + vc * nx, 1), round(r["fy"] + uc * dy + vc * ny, 1),
                     round(hu1 - hu0, 1), round(hv1 - hv0, 1), round(math.degrees(math.atan2(dy, dx)), 1)]
     # fond de l'arche (page entière)
     os.makedirs("app/arches", exist_ok=True)
     pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2), alpha=False)
-    Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB").save(f"app/arches/p{pn}.webp", "WEBP", quality=82)
+    Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB").save(f"app/arches/{src}-{pn}.webp", "WEBP", quality=82)
 json.dump(els, open("app/elements.json", "w", encoding="utf-8"), ensure_ascii=False, indent=0)
-json.dump({"w": round(doc[24].rect.width, 2), "h": round(doc[24].rect.height, 2)}, open("app/arches/size.json", "w"))
+
 print(stats)

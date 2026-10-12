@@ -1,7 +1,7 @@
 {
-  "name": "Palier · GAF UFOLEP",
-  "short_name": "Palier",
-  "description": "Construis et évalue tes enchaînements GAF UFOLEP (programme 2026).",
+  "name": "Mes Enchaînements · GAF / GAM UFOLEP",
+  "short_name": "Mes Enchaînements",
+  "description": "Construis tes enchaînements GAF et GAM UFOLEP et calcule leur note de départ (programme 2026).",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#14161c",

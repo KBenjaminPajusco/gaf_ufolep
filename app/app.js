@@ -1,13 +1,25 @@
 "use strict";
-// Palier — construction et évaluation d'enchaînements GAF UFOLEP (programme sept. 2026).
+// Mes Enchaînements — construction d'enchaînements GAF / GAM UFOLEP et note de départ (programme sept. 2026).
 // Données : elements.json (arches de la brochure). Règles : rules.js.
 
 const APPS = [
-  { id: "barres", label: "Barres", color: "var(--barres)" },
-  { id: "poutre", label: "Poutre", color: "var(--poutre)" },
-  { id: "sol", label: "Sol", color: "var(--sol)" },
-  { id: "saut", label: "Saut", color: "var(--saut)" },
+  { id: "barres", label: "Barres", disc: "GAF", color: "var(--barres)" },
+  { id: "poutre", label: "Poutre", disc: "GAF", color: "var(--poutre)" },
+  { id: "sol", label: "Sol", disc: "GAF", color: "var(--sol)" },
+  { id: "saut", label: "Saut", disc: "GAF", color: "var(--saut)" },
+  { id: "gsol", label: "Sol", disc: "GAM", color: "var(--sol)", el: "sol" },
+  { id: "arcons", label: "Arçons", disc: "GAM", color: "var(--arcons)" },
+  { id: "anneaux", label: "Anneaux", disc: "GAM", color: "var(--anneaux)" },
+  { id: "gsaut", label: "Saut", disc: "GAM", color: "var(--saut)", el: "saut" },
+  { id: "paralleles", label: "Barres parallèles", disc: "GAM", color: "var(--paralleles)" },
+  { id: "fixe", label: "Barre fixe", disc: "GAM", color: "var(--fixe)" },
 ];
+const APP = (id = state.app) => APPS.find((a) => a.id === id) || APPS[0];
+const elApp = (id = state.app) => APP(id).el || id;          // jeu d'éléments utilisé (sol et saut sont mixtes)
+const isGAM = (id = state.app) => APP(id).disc === "GAM";
+const levelsFor = (id = state.app) => (isGAM(id) ? GAM_LEVELS : LEVELS);
+const palTable = (id = state.app) => PALIERS_GAM[id] || PALIERS;
+const appName = (id) => `${APP(id).label} ${APP(id).disc}`;
 const PAL_NUM = { PR: 0, PR1: 0, PR2: 0, PR3: 0, P1: 1, P2: 2, P3: 3, P4: 4, P5: 5, P6: 6, P7: 7, NOMADE: -1 };
 const AVANT = ["En avant", "Vers l'avant"], ARRIERE = ["En arrière", "Vers l'arrière"];
 const KIND_LABEL = { acro: "acro", saut: "saut", pivot: "pivot", maintien: "maintien", force: "force", souplesse: "souplesse", cercle: "cercle", entree: "entrée", barre: "", saut_agres: "" };
@@ -60,7 +72,7 @@ function toast(msg) {
 }
 
 // ---------- statut d'un élément pour le niveau courant ----------
-function status(el, level = state.level) {
+function status(el, level = state.level, app = state.app) {
   if (el.app === "saut") {
     const r = SAUT[level];
     if (el.palier.startsWith("PR")) return { aut: r.prAut.includes(el.id), val: r.prVal.includes(el.id) };
@@ -68,7 +80,7 @@ function status(el, level = state.level) {
     return { aut: r.aut.includes(el.palier), val: r.val.includes(el.palier) };
   }
   if (el.palier === "NOMADE") return { aut: true, val: false };
-  const r = PALIERS[level];
+  const r = palTable(app)[level] || PALIERS[level];
   return { aut: r.aut.includes(el.palier), val: r.val.includes(el.palier) };
 }
 function palBadge(el, st) {
@@ -79,12 +91,13 @@ function palBadge(el, st) {
 
 // ---------- contexte d'évaluation ----------
 function buildCtx(d, level, app) {
-  const items = d.items.map((r, i) => {
-    const el = BY_ID[r.id]; const st = status(el, level);
-    const crossBeam = i > 0 && app === "poutre" && isMousse(r.id) !== isMousse(d.items[i - 1].id);
+  const known = (d.items || []).filter((r) => BY_ID[r.id]); // un élément inconnu (base mise à jour) est ignoré
+  const items = known.map((r, i) => {
+    const el = BY_ID[r.id]; const st = status(el, level, app);
+    const crossBeam = i > 0 && app === "poutre" && isMousse(r.id) !== isMousse(known[i - 1].id);
     return { ...el, i, link: i === 0 || crossBeam ? "none" : r.link || "none", bar: r.bar || "BI", mousse: isMousse(r.id), p: PAL_NUM[el.palier], aut: st.aut, val: st.val && el.palier !== "NOMADE" };
   });
-  if ((app === "barres" || app === "poutre") && items.length) items[items.length - 1].sortie = true;
+  if (["barres", "poutre", "anneaux", "paralleles", "fixe"].includes(app) && items.length) items[items.length - 1].sortie = true;
   const counted = items.filter((it) => it.aut);
 
   // séries liées directement (LA, LAE, LG, LM) et passages gymniques (PG, liaisons directes ou indirectes)
@@ -192,8 +205,9 @@ function evaluate(d, level = state.level, app = state.app) {
   const tcSpec = TC[app][level](H);
   const tc = tcSpec.map(([t, c, w], k) => {
     const m = man["tc" + k];
-    const ok = typeof c === "object" ? c.ok : !!c, why = typeof c === "object" ? describe(c) : w;
-    return { t, auto: ok, why, ok: m === "ok" ? true : m === "ko" ? false : !!ok, forced: m, c: typeof c === "object" ? c : null };
+    const manual = c === null;
+    const ok = c && typeof c === "object" ? c.ok : !!c, why = c && typeof c === "object" ? describe(c) : manual ? "À juger : coche-la si elle est réalisée" : w;
+    return { t, auto: ok, why, manual, ok: m === "ok" ? true : m === "ko" ? false : !!ok, forced: m, c: c && typeof c === "object" ? c : null };
   });
   const vSpec = VALOS[app][level];
   const vals = vSpec.map((v, k) => {
@@ -245,20 +259,21 @@ function evaluateSaut(d, level = state.level) {
 function render() {
   const home = state.page !== "edit";
   document.body.classList.toggle("on-recap", home);
-  document.body.classList.toggle("picking", !home && state.view === "catalogue" && state.app !== "saut");
+  document.body.classList.toggle("picking", !home && state.view === "catalogue" && elApp() !== "saut");
   $("#page-recap").hidden = !home;
   if (home) { $("#ctxbar").innerHTML = ""; renderRecap(); persist(); return; }
   const lvlColor = `var(--${state.level})`;
   document.documentElement.style.setProperty("--lvl", lvlColor);
   document.documentElement.style.setProperty("--app", APPS.find((a) => a.id === state.app).color);
-  const app = APPS.find((a) => a.id === state.app);
-  $("#ctxbar").innerHTML = `<span class="ctx-app" style="--c:${app.color}">${app.label}</span>
-    <label class="ctx-lvl" style="--c:var(--${state.level})"><span class="sr">Niveau</span><select id="ctxLevel" aria-label="Niveau de l'enchaînement">${LEVELS.map((l) => `<option value="${l}" ${l === state.level ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+  const app = APP();
+  if (!levelsFor().includes(state.level)) state.level = levelsFor()[0];
+  $("#ctxbar").innerHTML = `<span class="ctx-app" style="--c:${app.color}">${app.disc === "GAM" ? "GAM · " : ""}${app.label}</span>
+    <label class="ctx-lvl" style="--c:var(--${state.level})"><span class="sr">Niveau</span><select id="ctxLevel" aria-label="Niveau de l'enchaînement">${levelsFor().map((l) => `<option value="${l}" ${l === state.level ? "selected" : ""}>${l}</option>`).join("")}</select></label>
     <span class="ctx-name">${esc(draft().name || "Sans nom")}</span>`;
   document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.id === "pane-" + state.view));
   document.querySelectorAll("#tabbar button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === state.view));
   renderCatalogue();
-  if (state.app === "saut") renderSaut(); else { renderRoutine(); renderNote(); }
+  if (elApp() === "saut") renderSaut(); else { renderRoutine(); renderNote(); }
   persist();
   autosave();
 }
@@ -271,7 +286,7 @@ const F = () => (state.f ||= { arche: "", pal: [], kind: "", side: "", flags: []
 
 function catalogueList(arche = F().arche) {
   const f = F(), q = state.q.trim().toLowerCase();
-  return ELS.filter((e) => e.app === state.app).map((e) => [e, status(e)]).filter(([e, st]) => {
+  return ELS.filter((e) => e.app === elApp()).map((e) => [e, status(e)]).filter(([e, st]) => {
     if (state.filter === "val" && !st.val) return false;
     if (state.filter === "aut" && !st.aut) return false;
     if (arche && e.arche !== arche) return false;
@@ -286,10 +301,15 @@ function catalogueList(arche = F().arche) {
 
 const PAGE = { w: 1190.55, h: 841.89 };
 function renderCatalogue() {
-  const f = F(), isSaut = state.app === "saut";
+  if (!ELS.some((e) => e.app === elApp())) {
+    $("#pane-catalogue").innerHTML = `<div class="pick-bar"><button type="button" class="back-arrow" data-view="routine" aria-label="Retour">←</button><span>${esc(APP().label)}</span></div>
+      <header><h2 id="h-cat">Mouvements</h2></header><p class="empty">${esc(GAM_STATUS[state.app] || "Pas encore de catalogue pour cet agrès.")}</p>`;
+    return;
+  }
+  const f = F(), isSaut = elApp() === "saut";
   const curView = state.catView || (isMobile() ? "liste" : "arche");
   const arcView = curView === "arche";
-  const all = ELS.filter((e) => e.app === state.app);
+  const all = ELS.filter((e) => e.app === elApp());
   if (f.arche && !all.some((e) => e.arche === f.arche)) f.arche = "";
   const arches = [...new Set(all.map((e) => e.arche))];
   const shown = arcView ? f.arche || arches[0] : f.arche;
@@ -299,7 +319,7 @@ function renderCatalogue() {
   const list = catalogueList(shown);
   const order = (e) => (e.palier === "NOMADE" ? 9 : PAL_NUM[e.palier] + (e.palier.startsWith("PR") ? -1 : 0));
   list.sort((a, b) => order(a[0]) - order(b[0]) || a[0].arche.localeCompare(b[0].arche));
-  const pal = isSaut ? SAUT[state.level] : PALIERS[state.level];
+  const pal = isSaut ? SAUT[state.level] : palTable()[state.level];
   const nActive = f.pal.length + !!f.kind + !!f.side + f.flags.length + !!state.q.trim();
   const chip = (attr, val, on, label) => `<button type="button" class="fchip" ${attr}="${esc(val)}" aria-pressed="${on}">${label}</button>`;
   const inRoutine = {};
@@ -425,7 +445,7 @@ function seriesLabels(H, app) {
 
 function renderRoutine() {
   const d = draft(), ev = evaluate(d), H = ev.H;
-  const lab = seriesLabels(H, state.app);
+  const lab = seriesLabels(H, elApp());
   let html = `<header><h2 id="h-rout">Enchaînement</h2><span class="muted">${state.level} · ${esc(APPS.find((a) => a.id === state.app).label)}</span></header><div class="stack">
   <div class="card stack">
     <div class="rt-head">
@@ -436,12 +456,14 @@ function renderRoutine() {
     </div>
     <datalist id="gymList">${[...new Set((SAVED || []).map((r) => r.gym).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join("")}</datalist>
     <div id="saveState" class="save-state"></div>`;
-  html += `<ol class="rt-list" id="rtList">`;
-  if (!d.items.length) html += `<li class="empty ph">${isMobile() ? "Touche <b>+ Ajouter un élément</b> pour choisir ton premier mouvement.<br>Ils s'affichent ici dans l'ordre de passage." : "Glisse des mouvements ici, ou touche + dans le catalogue.<br>Ils s'affichent dans l'ordre de passage ; glisse-les pour changer l'ordre."}<br><br>${EXAMPLES[state.app].level === state.level ? `<button class="btn" type="button" data-act="example">Remplir avec l'exemple ${EXAMPLES[state.app].label}</button>` : ""}</li>`;
+  const noCat = !ELS.some((e) => e.app === elApp());
+  if (noCat) html += `<p class="empty">${esc(GAM_STATUS[state.app] || "")}</p>`;
+  html += `<ol class="rt-list" id="rtList" ${noCat ? "hidden" : ""}>`;
+  if (!d.items.length) html += `<li class="empty ph">${isMobile() ? "Touche <b>+ Ajouter un élément</b> pour choisir ton premier mouvement.<br>Ils s'affichent ici dans l'ordre de passage." : "Glisse des mouvements ici, ou touche + dans le catalogue.<br>Ils s'affichent dans l'ordre de passage ; glisse-les pour changer l'ordre."}<br><br>${EXAMPLES[state.app]?.level === state.level ? `<button class="btn" type="button" data-act="example">Remplir avec l'exemple ${EXAMPLES[state.app]?.label}</button>` : ""}</li>`;
   else {
     H.items.forEach((it, k) => {
       const st = { aut: it.aut, val: it.val };
-      const canIndirect = state.app === "sol" && it.kind === "saut" && H.items[k - 1]?.kind === "saut";
+      const canIndirect = elApp() === "sol" && it.kind === "saut" && H.items[k - 1]?.kind === "saut";
       const linkTxt = it.link === "direct" ? "lié" : it.link === "indirect" ? "lié par pas" : "non lié";
       html += `<li class="rt-item ${it.aut ? "" : "bad"} ${it.link !== "none" ? "linked" : ""}" data-eid="${it.id}">
         <span class="idx" title="glisser pour déplacer">${k + 1}</span><button type="button" class="rt-open" data-detail="${it.id}" data-pos="${k}" aria-label="Voir la fiche : ${esc(it.name)}">${it.img ? `<img class="rt-thumb" src="img/${it.id}.webp" alt="" draggable="false">` : palBadge(it, st)}</button>
@@ -457,7 +479,7 @@ function renderRoutine() {
     });
   }
   html += `</ol></div>
-  <button class="add-fab" type="button" data-view="catalogue">+ Ajouter un élément</button>`;
+  ${noCat ? "" : `<button class="add-fab" type="button" data-view="catalogue">+ Ajouter un élément</button>`}`;
   if (ev.warns.length) html += `<ul class="warn-list">${ev.warns.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>`;
   html += `<button class="btn wide" type="button" data-page="home">← Tous mes enchaînements${SAVED?.length ? ` (${SAVED.length})` : ""} →</button></div>`;
   $("#pane-routine").innerHTML = html;
@@ -500,46 +522,60 @@ function reqRow(kind, k, r, extra) {
     <span class="p">${extra?.pts ?? ""}</span></div>`;
 }
 
-// détail d'une exigence (tronc commun ou valorisation) dans une fenêtre
-function openReqDetail(key) {
-  const d = draft(), ev = evaluate(d), H = ev.H;
+// Détail d'une exigence : propose les mouvements du catalogue qui la rempliraient, à ajouter en un geste.
+// Principe : on essaie chaque mouvement autorisé en fin d'enchaînement (non lié, puis lié au précédent)
+// et on garde ceux qui font progresser l'exigence.
+function reqRowOf(ev, key) {
   const isTc = key.startsWith("tc"), k = Number(key.replace(/\D/g, ""));
-  const r = isTc ? ev.tc[k] : ev.vals[k]; if (!r) return;
-  const elRow = (it) => `<li><button type="button" class="dl-el" data-detail="${it.id}" data-pos="${it.i}">
-      ${it.img ? `<img src="img/${it.id}.webp" alt="" loading="lazy">` : ""}${palBadge(it, { aut: it.aut, val: it.val })}
-      <span><b>${esc(it.name)}</b><small>n° ${it.i + 1} dans l'enchaînement · ${esc(it.arche)}${it.side ? " · " + esc(it.side) : ""}</small></span></button></li>`;
-  const list = (its) => its.length ? `<ul class="dl-list">${its.map(elRow).join("")}</ul>` : "";
-  const uniq = (its) => its.filter((it, x) => its.findIndex((o) => o.i === it.i) === x);
-  let status, body = "";
-  if (isTc) {
-    status = r.ok ? ["ok", "Exigence remplie · +1"] : ["ko", "Exigence non remplie · 0"];
-    const c = r.c || {};
-    if (r.why) body += `<p class="dl-why">${esc(r.why)}</p>`;
-    if (c.groups) body += c.groups.map(([a, its]) => `<h4>${esc(a)}</h4>${list(its)}`).join("");
-    else if (c.items?.length) body += `<h4>Mouvements concernés</h4>${list(uniq(c.items))}`;
-    else body += `<p class="muted">Aucun mouvement de l'enchaînement ne remplit cette exigence.</p>`;
-  } else {
-    status = r.kept ? ["ok", `Valorisation retenue · +${r.pts}`] : r.ok ? ["warn", `Possible mais pas retenue · ${r.pts} pts`] : r.manual && !r.forced ? ["warn", `À juger · ${r.pts} pts`] : ["ko", `Non validée · ${r.pts} pts`];
-    const its = (w) => (w || []).map((i) => H.items[i]).filter(Boolean);
-    if (r.kept && r.use?.length) body += `<h4>Retenue avec</h4>${list(its(r.use))}`;
-    else if (r.kept) body += `<p class="muted">Validée à la main.</p>`;
-    const others = r.wit.filter((w) => w.length && w !== r.use).slice(0, 6);
-    if (others.length) body += `<h4>${r.kept ? "Autres possibilités" : "Possibilités"}</h4>` + others.map((w) => `<div class="dl-combo">${list(its(w))}</div>`).join("");
-    if (!r.ok && !r.manual) body += `<p class="muted">Aucune combinaison de l'enchaînement ne remplit cette valorisation.</p>`;
-    if (r.manual && !r.forced) body += `<p class="muted">Cette valorisation demande un jugement : l'appli ne peut pas la vérifier seule. Valide-la à la main si elle est réalisée.</p>`;
-    body += `<p class="note-foot">Une valorisation est validée même avec une chute. Elle ne peut pas contenir d'élément nomade et doit utiliser des éléments distincts des autres valorisations${state.app === "sol" ? " (sauf « 2 acros de sens différents »)" : ""}.</p>`;
+  return isTc ? ev.tc[k] : ev.vals[k];
+}
+function suggestFor(d, key) {
+  const ev = evaluate(d), r = reqRowOf(ev, key), isTc = key.startsWith("tc");
+  if (!r || r.manual) return { r, list: [] };
+  const cands = ELS.filter((e) => e.app === elApp() && status(e).aut);
+  // « 4 arches » : uniquement les éléments des arches absentes de l'enchaînement
+  if (isTc && /arches$/.test(r.t)) {
+    const have = new Set(ev.H.counted.map((it) => it.arche));
+    return { r, list: cands.filter((e) => !have.has(e.arche)).map((e) => ({ e, link: "none" })), arches: true };
   }
-  const man = d.manual[key];
+  if (isTc && /éléments$/.test(r.t)) return { r, list: [], info: "Ajoute des mouvements différents depuis le catalogue jusqu'à atteindre le nombre demandé." };
+  const n = d.items.length, last = d.items.at(-1);
+  const score = (row) => (isTc ? (row.ok ? 1000 : 0) + (row.c?.items?.length || 0) : (row.ok ? 1 : 0));
+  const base = score(r), out = [];
+  for (const e of cands) {
+    for (const link of n ? ["none", "direct"] : ["none"]) {
+      const test = { ...d, items: [...d.items, { id: e.id, link, bar: last?.bar || "BI" }] };
+      const r2 = reqRowOf(evaluate(test), key);
+      const uses = isTc ? (r2.c?.items || []).some((it) => it.i === n) : r2.wit.some((w) => w.includes(n));
+      if (uses && (score(r2) > base || r.ok)) { out.push({ e, link }); break; }
+    }
+  }
+  return { r, list: out };
+}
+function openReqDetail(key) {
+  const d = draft(), ev = evaluate(d);
+  const isTc = key.startsWith("tc"), r = reqRowOf(ev, key); if (!r) return;
+  const stat = isTc ? (r.manual && !r.forced ? ["warn", "À juger"] : r.ok ? ["ok", "Exigence remplie · +1"] : ["ko", "Exigence non remplie · 0"])
+    : r.kept ? ["ok", `Valorisation retenue · +${r.pts}`] : r.ok ? ["warn", `Possible mais pas retenue · ${r.pts} pts`] : r.manual && !r.forced ? ["warn", `À juger · ${r.pts} pts`] : ["ko", `Non validée · ${r.pts} pts`];
+  const sg = suggestFor(d, key);
+  const order = (e) => (e.palier === "NOMADE" ? 9 : PAL_NUM[e.palier]);
+  const groups = new Map();
+  for (const x of sg.list.sort((a, b) => order(a.e) - order(b.e))) { if (!groups.has(x.e.arche)) groups.set(x.e.arche, []); groups.get(x.e.arche).push(x); }
+  const card = ({ e, link }) => { const st = status(e); return `<li><button type="button" class="sg-el" data-sadd="${e.id}:${link}" title="Ajouter à l'enchaînement">
+      ${e.img ? `<img src="img/${e.id}.webp" alt="" loading="lazy">` : ""}${palBadge(e, st)}
+      <span><b>${esc(e.name)}</b>${link === "direct" ? `<small>lié à l'élément précédent</small>` : ""}</span><span class="sg-add" aria-hidden="true">+</span></button></li>`; };
+  let body;
+  if (r.manual && !r.forced) body = `<p class="muted">L'appli ne peut pas vérifier cette exigence seule. Touche le rond à gauche de la ligne dans le barème pour la cocher si elle est réalisée.</p>`;
+  else if (sg.info) body = `<p class="muted">${esc(sg.info)}</p>`;
+  else if (!sg.list.length) body = `<p class="muted">${r.ok ? "C'est déjà rempli, et aucun autre mouvement du catalogue n'y contribuerait." : "Aucun mouvement ajouté seul en fin d'enchaînement ne remplit ce critère : il faut sans doute une liaison ou plusieurs éléments (voir le barème)."}</p>`;
+  else body = `<p class="muted">${sg.arches ? "Éléments des arches que tu n'as pas encore dans l'enchaînement." : r.ok ? "C'est rempli. Autres mouvements qui conviendraient :" : "Mouvements qui rempliraient ce critère s'ils sont ajoutés en fin d'enchaînement."} Touche un mouvement pour l'ajouter.</p>`
+    + [...groups].map(([a, xs]) => `<h4>${esc(a)}</h4><ul class="sg-list">${xs.map(card).join("")}</ul>`).join("");
   const dlg = $("#detail");
   dlg.innerHTML = `<form method="dialog" class="dlg">
     <header><span class="muted">${isTc ? "Tronc commun" : "Valorisation" + (r.s ? " principale (*)" : "")}</span><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
     <h3>${esc(r.t)}</h3>
-    <div class="dl-status ${status[0]}">${status[1]}</div>
+    <div class="dl-status ${stat[0]}">${stat[1]}</div>
     ${body}
-    <div class="dl-man"><span class="muted">Statut :</span><div class="seg">
-      <button type="button" data-manset="${key}:" aria-pressed="${!man}">Automatique</button>
-      <button type="button" data-manset="${key}:ok" aria-pressed="${man === "ok"}">Valider à la main</button>
-      <button type="button" data-manset="${key}:ko" aria-pressed="${man === "ko"}">Refuser</button></div></div>
   </form>`;
   dlg._req = key;
   if (!dlg.open) dlg.showModal();
@@ -555,6 +591,7 @@ function renderNote() {
     <div><span>Valorisations</span><b>${ev.vPts}<small class="muted">/${ev.vMax}</small></b></div>
     <div class="final"><span>Note de départ</span><b>${fmt(ev.nd)}<small>/${ev.ndMax}</small></b></div>
   </div>
+  ${isGAM() ? `<p class="gam-note">${GAM_STATUS[state.app] ? esc(GAM_STATUS[state.app]) + "<br>" : ""}${esc(GAM_NOTE)}</p>` : ""}
   <div class="card req-group"><h3>Tronc commun <span class="pts muted">1 pt par exigence</span></h3>
     ${ev.tc.map((r, k) => reqRow("tc", k, r, { why: r.why || (r.forced ? "réglé à la main" : ""), pts: r.ok ? "+1" : "0" })).join("")}
   </div>
@@ -567,13 +604,13 @@ function renderNote() {
       else if (v.manual && !v.forced) why = "Demande un jugement : coche-la si elle est réalisée";
       return reqRow("v", k, { ...v, ok: v.kept }, { why, pts: v.kept ? "+" + v.pts : v.pts, kept: v.kept });
     }).join("")}
-    <p class="note-foot">Une valorisation ne peut pas contenir d'élément nomade et doit utiliser des éléments distincts des autres valorisations${state.app === "sol" ? " (sauf « 2 acros de sens différents »)" : ""}. Elle est validée même avec une chute.</p>
+    <p class="note-foot">Une valorisation ne peut pas contenir d'élément nomade et doit utiliser des éléments distincts des autres valorisations${elApp() === "sol" ? " (sauf « 2 acros de sens différents »)" : ""}. Elle est validée même avec une chute.</p>
   </div>
   <div class="card info"><h3 style="font-size:18px;text-transform:uppercase;margin-bottom:8px">Rappels ${esc(APPS.find((a) => a.id === state.app).label)} ${state.level}</h3><dl>
-    <dt>Paliers autorisés</dt><dd>${PALIERS[state.level].aut.join(", ")}</dd>
-    <dt>Valorisables</dt><dd>${PALIERS[state.level].val.join(", ")}</dd>
+    <dt>Paliers autorisés</dt><dd>${palTable()[state.level].aut.join(", ")}</dd>
+    <dt>Valorisables</dt><dd>${palTable()[state.level].val.join(", ")}</dd>
     ${state.app === "poutre" ? `<dt>Durée</dt><dd>${DUREE.poutre[lvlKey]}</dd>` : ""}
-    ${state.app === "sol" ? `<dt>Durée</dt><dd>${DUREE.sol[state.level] || DUREE.sol[lvlKey]}</dd><dt>Musique</dt><dd>sans chant, l'exercice se termine avec la musique</dd>` : ""}
+    ${elApp() === "sol" ? `<dt>Durée</dt><dd>${DUREE.sol[state.level] || DUREE.sol[lvlKey]}</dd><dt>Musique</dt><dd>sans chant, l'exercice se termine avec la musique</dd>` : ""}
     ${state.app === "barres" && lvlKey !== "C" ? `<dt>Parties</dt><dd>${DUREE.barres[lvlKey]}</dd>` : ""}
     <dt>LA / LAE</dt><dd>éléments acrobatiques liés directement, sans pas ni sursaut ; LAE = tous avec envol, salti appel 2 pieds</dd>
     ${state.app !== "barres" ? `<dt>LG / LM</dt><dd>LG : 2 éléments gymniques différents (sauts, pivots) ; LM (poutre) : 1 gymnique + 1 acro. Tous dans les paliers valorisables.</dd>` : ""}
@@ -641,7 +678,7 @@ async function encodeRoutine(r) {
     a: r.app, l: r.level, n: r.name || "", g: r.gym || "",
     i: (r.items || []).map((it) => [it.id, it.link === "direct" ? 1 : it.link === "indirect" ? 2 : 0, it.bar === "BS" ? 1 : 0, it.mousse ? 1 : 0]),
     m: r.manual && Object.keys(r.manual).length ? r.manual : undefined,
-    j: r.app === "saut" ? r.jumps : undefined, s: r.app === "saut" ? r.svalos : undefined,
+    j: elApp(r.app) === "saut" ? r.jumps : undefined, s: elApp(r.app) === "saut" ? r.svalos : undefined,
   };
   const raw = new TextEncoder().encode(JSON.stringify(compact));
   const bytes = window.CompressionStream ? await pipe(raw, new CompressionStream("deflate-raw")) : raw;
@@ -675,7 +712,7 @@ async function openShare(r) {
     <div class="vrow"><textarea id="shCode" readonly rows="3">${esc(code)}</textarea><button class="btn" type="button" data-copy="shCode">Copier le code</button></div>
     ${navigator.share ? `<button class="btn wide" type="button" data-act="nshare">Envoyer avec une appli…</button>` : ""}
   </form>`;
-  dlg._share = { title: `Enchaînement ${r.name || ""}`, text: `Mon enchaînement ${APPS.find((a) => a.id === r.app).label} ${r.level} sur Palier :`, url: link };
+  dlg._share = { title: `Enchaînement ${r.name || ""}`, text: `Mon enchaînement ${APPS.find((a) => a.id === r.app).label} ${r.level} sur Mes Enchaînements :`, url: link };
   if (!dlg.open) dlg.showModal();
 }
 function openImport(prefill = "") {
@@ -695,7 +732,7 @@ async function previewImport() {
   try {
     const r = await decodeRoutine($("#impCode").value);
     const s = summary(r);
-    box.innerHTML = `<div class="imp-ok"><span class="lv" style="background:var(--${r.level})">${r.level}</span> <b>${esc(APPS.find((a) => a.id === r.app).label)} · ${esc(r.name || "Sans nom")}</b>${r.gym ? ` · ${esc(r.gym)}` : ""}<br><span class="muted">${r.app === "saut" ? "" : `${r.items.length} mouvements · `}note de départ ${s.main}${r.lost ? ` · ${r.lost} mouvement(s) inconnu(s) ignoré(s)` : ""}</span></div>`;
+    box.innerHTML = `<div class="imp-ok"><span class="lv" style="background:var(--${r.level})">${r.level}</span> <b>${esc(APPS.find((a) => a.id === r.app).label)} · ${esc(r.name || "Sans nom")}</b>${r.gym ? ` · ${esc(r.gym)}` : ""}<br><span class="muted">${elApp(r.app) === "saut" ? "" : `${r.items.length} mouvements · `}note de départ ${s.main}${r.lost ? ` · ${r.lost} mouvement(s) inconnu(s) ignoré(s)` : ""}</span></div>`;
     return r;
   } catch (err) { box.innerHTML = $("#impCode").value.trim() ? `<p class="imp-err">${esc(err.message)}</p>` : ""; return null; }
 }
@@ -748,7 +785,7 @@ async function stashIfNeeded(d, app, level) {
 
 // ---------- créer / ouvrir un enchaînement ----------
 function newRoutine(app, level, name, gym) {
-  const label = APPS.find((a) => a.id === app).label;
+  const label = appName(app);
   const r = { id: uid(), app, level, name: name || `${label} ${level}`, gym: gym || "", items: [], manual: {}, ded: { p: 0, m: 0, g: 0, c: 0 },
     jumps: [{ id: "", ded: 0 }, { id: "", ded: 0 }], svalos: {}, updated: new Date().toISOString() };
   Routines.put(r); SAVED = null;
@@ -764,19 +801,22 @@ function openRoutine(r) {
 }
 function openCreate(keep) {
   const dlg = $("#detail");
-  if (!keep) { dlg._app = null; dlg._lvl = null; dlg._name = ""; dlg._gym = ""; }
+  if (!keep) { dlg._disc = null; dlg._app = null; dlg._lvl = null; dlg._name = ""; dlg._gym = ""; }
   const app = APPS.find((a) => a.id === dlg._app);
+  const disc = dlg._disc;
   dlg.innerHTML = `<form method="dialog" class="dlg create">
     <header><h3>Créer un enchaînement</h3><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
-    <h4>1 · Agrès</h4>
-    <div class="ctiles">${APPS.map((a) => `<button type="button" class="ctile" data-capp="${a.id}" style="--c:${a.color}" aria-pressed="${dlg._app === a.id}">${a.label}</button>`).join("")}</div>
-    <h4>2 · Niveau</h4>
-    <div class="ltiles">${LEVELS.map((l) => `<button type="button" class="ltile" data-clvl="${l}" style="--c:var(--${l})" aria-pressed="${dlg._lvl === l}">${l}</button>`).join("")}</div>
-    <h4>3 · Nom et gymnaste <span class="muted">(facultatif)</span></h4>
+    <h4>1 · Discipline</h4>
+    <div class="dtiles">${["GAF", "GAM"].map((x) => `<button type="button" class="ctile" data-cdisc="${x}" style="--c:var(--ink)" aria-pressed="${disc === x}">${x}<small>${x === "GAF" ? "gymnastique féminine" : "gymnastique masculine"}</small></button>`).join("")}</div>
+    ${disc ? `<h4>2 · Agrès</h4>
+    <div class="ctiles ${disc === "GAM" ? "six" : ""}">${APPS.filter((a) => a.disc === disc).map((a) => `<button type="button" class="ctile" data-capp="${a.id}" style="--c:${a.color}" aria-pressed="${dlg._app === a.id}">${a.label}</button>`).join("")}</div>
+    <h4>3 · Niveau</h4>
+    <div class="ltiles">${(disc === "GAM" ? GAM_LEVELS : LEVELS).map((l) => `<button type="button" class="ltile" data-clvl="${l}" style="--c:var(--${l})" aria-pressed="${dlg._lvl === l}">${l}</button>`).join("")}</div>` : ""}
+    <h4>${disc ? 4 : 2} · Nom et gymnaste <span class="muted">(facultatif)</span></h4>
     <div class="vrow"><input id="cName" type="text" placeholder="${app ? `${app.label} ${dlg._lvl || ""}`.trim() : "Nom"}" value="${esc(dlg._name || "")}" aria-label="Nom">
       <input id="cGym" type="text" placeholder="Gymnaste" value="${esc(dlg._gym || "")}" list="gymList2" aria-label="Gymnaste"></div>
     <datalist id="gymList2">${[...new Set(Routines.all().map((r) => r.gym).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join("")}</datalist>
-    <button class="btn primary wide" type="button" data-act="docreate" ${dlg._app && dlg._lvl ? "" : "disabled"}>${dlg._app && dlg._lvl ? `Créer · ${app.label} ${dlg._lvl}` : "Choisis l'agrès et le niveau"}</button>
+    <button class="btn primary wide" type="button" data-act="docreate" ${dlg._app && dlg._lvl ? "" : "disabled"}>${dlg._app && dlg._lvl ? `Créer · ${app.disc} ${app.label} ${dlg._lvl}` : disc ? "Choisis l'agrès et le niveau" : "Choisis la discipline"}</button>
   </form>`;
   if (!dlg.open) dlg.showModal();
 }
@@ -795,7 +835,7 @@ function migrateDrafts() {
 
 // ---------- page « Mes enchaînements » ----------
 function summary(r) {
-  if (r.app === "saut") { const ev = evaluateSaut(r, r.level); return { main: fmt(ev.final), sub: "meilleur saut + valorisations", tc: "" }; }
+  if (elApp(r.app) === "saut") { const ev = evaluateSaut(r, r.level); return { main: fmt(ev.final), sub: "meilleur saut + valorisations", tc: "" }; }
   const ev = evaluate(r, r.level, r.app);
   return { main: `${fmt(ev.nd)}<small>/${ev.ndMax}</small>`, nd: `${fmt(ev.nd)}/${ev.ndMax}`, tc: `TC ${ev.tcPts}/${ev.tc.length}`, v: `valorisations ${ev.vPts}/${ev.vMax}`, warn: ev.warns.length };
 }
@@ -805,7 +845,7 @@ async function renderRecap() {
   if (SAVED === null) { box.innerHTML = `<p class="empty">Le navigateur bloque le stockage local : les enchaînements ne peuvent pas être gardés ici.</p>`; return; }
   const rf = (state.rf ||= { q: "", app: "", level: "" });
   const q = rf.q.trim().toLowerCase();
-  const list = SAVED.filter((r) => BY_ID && (!rf.app || r.app === rf.app) && (!rf.level || r.level === rf.level)
+  const list = SAVED.filter((r) => BY_ID && (!rf.disc || APP(r.app).disc === rf.disc) && (!rf.app || r.app === rf.app) && (!rf.level || r.level === rf.level)
     && (!q || `${r.name} ${r.gym || ""}`.toLowerCase().includes(q)));
   const groups = {};
   for (const r of list) (groups[r.gym?.trim() || ""] ||= []).push(r);
@@ -822,7 +862,8 @@ async function renderRecap() {
     <input class="search" id="rq" type="search" placeholder="Chercher un nom ou une gymnaste" value="${esc(rf.q)}" aria-label="Chercher un enchaînement">
   </div>
   <div class="filters-inline">
-    <div class="frow"><span class="flabel">Agrès</span>${chip("data-rapp", "", !rf.app, "Tous")}${APPS.map((a) => chip("data-rapp", a.id, rf.app === a.id, a.label)).join("")}</div>
+    <div class="frow"><span class="flabel">Discipline</span>${chip("data-rdisc", "", !rf.disc, "Toutes")}${["GAF", "GAM"].map((x) => chip("data-rdisc", x, rf.disc === x, x)).join("")}</div>
+    <div class="frow"><span class="flabel">Agrès</span>${chip("data-rapp", "", !rf.app, "Tous")}${APPS.filter((a) => !rf.disc || a.disc === rf.disc).map((a) => chip("data-rapp", a.id, rf.app === a.id, rf.disc ? a.label : appName(a.id))).join("")}</div>
     <div class="frow"><span class="flabel">Niveau</span>${chip("data-rlvl", "", !rf.level, "Tous")}${LEVELS.map((l) => chip("data-rlvl", l, rf.level === l, l)).join("")}</div>
   </div>`;
   if (!SAVED.length) html += `<p class="empty">Aucun enchaînement pour l'instant.<br>Touche <b>Créer un enchaînement</b>, choisis l'agrès et le niveau : il sera enregistré ici automatiquement, au fil de tes modifications.</p>`;
@@ -831,10 +872,10 @@ async function renderRecap() {
     html += `<section class="gym-group"><h3>${g ? esc(g) : "Sans gymnaste"}</h3><ul class="rcards">`;
     for (const r of groups[g]) {
       const s = summary(r), app = APPS.find((a) => a.id === r.app);
-      const thumbs = (r.app === "saut" ? r.jumps.map((j) => j.id) : r.items.map((i) => i.id)).filter((id) => BY_ID[id]?.img).slice(0, 8);
-      const n = r.app === "saut" ? r.jumps.filter((j) => j.id).length : r.items.length;
+      const thumbs = (elApp(r.app) === "saut" ? r.jumps.map((j) => j.id) : r.items.map((i) => i.id)).filter((id) => BY_ID[id]?.img).slice(0, 8);
+      const n = elApp(r.app) === "saut" ? r.jumps.filter((j) => j.id).length : r.items.length;
       html += `<li class="rcard" style="--c:${app.color}">
-        <div class="rtop"><span class="lv" style="background:var(--${r.level})">${r.level}</span><span class="app">${app.label}</span><span class="muted when">modifié le ${date(r.updated)}</span></div>
+        <div class="rtop"><span class="lv" style="background:var(--${r.level})">${r.level}</span><span class="app">${app.disc === "GAM" ? "GAM · " : ""}${app.label}</span><span class="muted when">modifié le ${date(r.updated)}</span></div>
         <button type="button" class="rname" data-ropen="${r.id}">${esc(r.name || "Sans nom")}</button>
         <div class="rscore"><b>${s.main}</b><span>${s.nd ? `note de départ · ${s.tc} · ${s.v}` : s.sub}</span></div>
         <div class="rthumbs">${thumbs.map((id) => `<img src="img/${id}.webp" alt="" loading="lazy">`).join("")}${n > thumbs.length ? `<span class="more">${n} mvt${n > 1 ? "s" : ""}</span>` : ""}</div>
@@ -856,10 +897,10 @@ document.addEventListener("click", async (e) => {
   else if (ds.view || ds.go) { state.view = ds.view || ds.go; window.scrollTo({ top: 0 }); }
   else if (ds.filter) state.filter = ds.filter;
   else if (ds.req) { state.detail = null; openReqDetail(ds.req); return; }
-  else if ("manset" in ds) {
-    const [key, v] = ds.manset.split(":");
-    if (v) d.manual[key] = v; else delete d.manual[key];
-    render(); openReqDetail(key); return;
+  else if (ds.sadd) {
+    const [id, link] = ds.sadd.split(":"); const prev = d.items.at(-1);
+    d.items.push({ id, link: d.items.length ? link : "none", bar: prev?.bar || "BI" });
+    render(); toast(`Ajouté : ${BY_ID[id].name.slice(0, 40)}`); openReqDetail($("#detail")._req); return;
   }
   else if (ds.detail) { e.preventDefault(); state.fromReq = b.closest("#detail") ? $("#detail")._req || null : null; state.detail = ds.detail; state.detailPos = ds.pos != null ? Number(ds.pos) : null; renderDetail(); return; }
   else if ("archePick" in ds) { F().arche = ds.archePick; F().side = ""; F().kind = ""; }
@@ -886,7 +927,7 @@ document.addEventListener("click", async (e) => {
     if (isMobile()) { state.view = "routine"; render(); requestAnimationFrame(() => $("#rtList .rt-item:last-child")?.scrollIntoView({ block: "center" })); return; }
   } else if (ds.link) {
     const it = d.items[ds.link], cur = BY_ID[it.id], pv = BY_ID[d.items[ds.link - 1].id];
-    const cycle = state.app === "sol" && cur.kind === "saut" && pv.kind === "saut" ? ["none", "direct", "indirect"] : ["none", "direct"];
+    const cycle = elApp() === "sol" && cur.kind === "saut" && pv.kind === "saut" ? ["none", "direct", "indirect"] : ["none", "direct"];
     it.link = cycle[(cycle.indexOf(it.link || "none") + 1) % cycle.length];
   } else if (ds.bar) { const it = d.items[ds.bar]; it.bar = it.bar === "BS" ? "BI" : "BS"; }
   else if (ds.move) {
@@ -904,13 +945,15 @@ document.addEventListener("click", async (e) => {
   } else if (ds.sval) { const s = (d.svalos[ds.sval] ||= {}); s.on = !s.on; }
   else if (ds.act === "example") {
     const ex = EXAMPLES[state.app]; state.level = ex.level;
-    const find = (re, pal) => ELS.find((x) => x.app === state.app && re.test(x.name) && (!pal || x.palier === pal))?.id;
+    const find = (re, pal) => ELS.find((x) => x.app === elApp() && re.test(x.name) && (!pal || x.palier === pal))?.id;
     const items = ex.items.map(([re, pal, o]) => ({ id: find(re, pal), link: "none", bar: "BI", ...o })).filter((x) => x.id);
     state.drafts[draftKey()] = { ...draft(), name: `Exemple ${ex.label}`, items };
     toast(`Exemple ${ex.label} chargé`);
   } else if (ds.act === "create") { openCreate(); return; }
-  else if (ds.capp || ds.clvl) {
-    const dlg = $("#detail"); if (ds.capp) dlg._app = ds.capp; if (ds.clvl) dlg._lvl = ds.clvl;
+  else if (ds.capp || ds.clvl || ds.cdisc) {
+    const dlg = $("#detail");
+    if (ds.cdisc && ds.cdisc !== dlg._disc) { dlg._disc = ds.cdisc; dlg._app = null; dlg._lvl = null; }
+    if (ds.capp) dlg._app = ds.capp; if (ds.clvl) dlg._lvl = ds.clvl;
     dlg._name = $("#cName")?.value ?? ""; dlg._gym = $("#cGym")?.value ?? ""; openCreate(true); return;
   } else if (ds.act === "docreate") {
     const dlg = $("#detail"); if (!dlg._app || !dlg._lvl) { toast("Choisis l'agrès et le niveau"); return; }
@@ -935,6 +978,7 @@ document.addEventListener("click", async (e) => {
     Routines.put(rr); $("#detail").close(); history.replaceState(null, "", location.pathname);
     SAVED = null; toast(`Importé : ${rr.name}`);
   }
+  else if ("rdisc" in ds) { (state.rf ||= {}).disc = ds.rdisc; state.rf.app = ""; }
   else if ("rapp" in ds) (state.rf ||= {}).app = ds.rapp;
   else if ("rlvl" in ds) (state.rf ||= {}).level = ds.rlvl;
   else if (ds.ropen) {
@@ -1001,7 +1045,7 @@ fetch("elements.json").then((r) => r.json()).then((data) => {
   state.page = location.hash === "#edit" && state.drafts[draftKey()]?.saved ? "edit" : "home";
   const hc = location.hash.match(/^#code=(PAL1-[A-Za-z0-9_-]+)/);
   if (hc) { state.page = "home"; setTimeout(() => openImport(hc[1]), 0); }
-  loadSaved().then(() => { if (state.page === "edit" && state.app !== "saut") renderRoutine(); });
+  loadSaved().then(() => { if (state.page === "edit" && elApp() !== "saut") renderRoutine(); });
   render();
 });
 window.ResizeObserver && new ResizeObserver(([e]) => document.documentElement.style.setProperty("--top", e.target.offsetHeight + "px")).observe($(".top"));

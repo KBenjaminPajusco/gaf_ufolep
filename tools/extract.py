@@ -1,9 +1,12 @@
 import pymupdf, re, json, math
-doc = pymupdf.open("source/gaf_pt.pdf")
+SOURCES = [("gaf", "source/gaf_pt.pdf", range(23, 46)), ("anneaux", "source/gam_anneaux.pdf", range(1, 5)),
+           ("paralleles", "source/gam_parallele.pdf", range(1, 6)), ("fixe", "source/gam_fixe.pdf", range(1, 5))]
 CX, CY, R1, STEP = 595.5, 634.0, 134.0, 67.5
-ID = re.compile(r"^(\d+(?:/\d+)?\+?(?:\s*bis)?)\s*(new|26)?\s*(?:bis)?\s*-\s*(.*)$")
+ID = re.compile(r"^(\d+(?:/\d+)?\+?(?:\s*bis)?)\s*(new|26)?\s*(?:bis)?\s*-\s*(.*)$", re.I)
 out = []
-for pn in range(23, 46):
+for src, path, pages in SOURCES:
+  doc = pymupdf.open(path)
+  for pn in pages:
     p = doc[pn-1]; d = p.get_text("rawdict")
     for b in d["blocks"]:
         for l in b.get("lines", []):
@@ -51,7 +54,7 @@ for pn in range(23, 46):
             for (px, py) in l["pts"]:
                 us.append((px-mx)*dx + (py-my)*dy); vs.append((px-mx)*nx + (py-my)*ny)
             vs.append(max(vs) + l["size"] * 0.8); us.append(max(us) + l["size"] * 0.5)
-        out.append(dict(page=pn, hdr=hdr, num=mm.group(1), tag=mm.group(2) or "", name=mm.group(3), zone=zone, r=round(r), ang=round(ang), x=round(mx), y=round(my),
+        out.append(dict(src=src, page=pn, hdr=hdr, num=mm.group(1), tag=mm.group(2) or "", name=mm.group(3), zone=zone, r=round(r), ang=round(ang), x=round(mx), y=round(my),
                         fx=mx, fy=my, dx=dx, dy=dy, u0=min(us), u1=max(us), v0=min(vs), v1=max(vs)))
 json.dump(out, open("tools/raw.json","w",encoding="utf-8"), ensure_ascii=False, indent=0)
-for e in out: print(e["page"], e["zone"], e["ang"], e["num"], e["tag"], e["name"][:90])
+for e in out: print(e["src"], e["page"], e["zone"], e["ang"], e["num"], e["tag"], e["name"][:90])

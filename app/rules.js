@@ -220,3 +220,130 @@ const VALOS = {
       V("2 salti liés dont 1 P5 (min.)", (H) => H.twoSalti(5))],
   },
 };
+
+// ======================= GAM =======================
+// Document de travail « Valorisations GAM » du 10/10/2026 (programme technique GAM officiel « à venir »).
+// Sol et saut sont des agrès mixtes : arches et tronc commun du sol repris de la brochure (niveaux GAF/GAM).
+// Cases grisées du document = valorisations principales (*), 3 pts ; les autres 2 pts.
+const GAM_LEVELS = ["A1", "B1", "B2", "B3", "C2", "C3"];
+const pal = (aut, val) => ({ aut: range(...aut.split("-")), val: range(...val.split("-")) });
+const GAM_STD = { A1: pal("PR-P3", "P1-P2"), B1: pal("P1-P5", "P1-P4"), B2: pal("P1-P5", "P1-P4"), B3: pal("P1-P5", "P3-P5"), C2: pal("P3-P7", "P4-P7"), C3: pal("P3-P7", "P4-P7") };
+const PALIERS_GAM = {
+  gsol: { ...GAM_STD, B2: pal("P1-P5", "P1-P5"), B3: pal("P1-P6", "P3-P6") },
+  arcons: GAM_STD, anneaux: GAM_STD, paralleles: GAM_STD,
+  fixe: GAM_STD, // barème barre fixe pas encore publié : paliers supposés identiques aux autres agrès GAM
+};
+const GAM_STATUS = {
+  arcons: "Arches des arçons pas encore publiées (document de travail sans noms de mouvements) : coche les exigences à la main.",
+  fixe: "Barème GAM de la barre fixe pas encore publié : le catalogue est disponible, la note de départ viendra avec le programme officiel.",
+};
+const GAM_NOTE = "D'après le document de travail « Valorisations GAM » du 10/10/2026 ; le programme technique GAM officiel est annoncé « à venir ».";
+
+const tenu = (it) => !!it.tenu;
+const sortieOk = (H, k, salto) => H.one((it) => it.i === H.items.length - 1 && it.p >= k && (!salto || it.salto));
+TC.gsol = TC.sol;
+TC.arcons = Object.fromEntries(GAM_LEVELS.map((l) => [l, () => ({
+  A1: ["1 champi", "1 position dorsale"], B1: ["1 cercle", "1 élan"], B2: ["3 cercles enchaînés", "1 élan", "1 sortie"],
+  B3: ["1 transversal", "1 élan", "1 sortie"], C2: ["3 éléments cercle", "1 élan", "1 sortie"], C3: ["3 éléments cercle", "1 élan", "1 sortie"],
+}[l].map((t) => [t, null]))]));
+TC.anneaux = {
+  A1: (H) => [["1 maintien", H.need(tenu)], ["1 élément P2 (min.)", H.need((it) => it.p >= 2)]],
+  B1: (H) => [["1 suspension P2 (min.)", H.need((it) => it.arche === "Suspension" && it.p >= 2)], ["1 élément P3 (min.)", H.need((it) => it.p >= 3)]],
+  B2: (H) => [["1 dislocation", H.need((it) => it.disloc)], ["1 élément P4 (min.)", H.need((it) => it.p >= 4)], ["1 sortie", H.need((it) => it.sortiekind)]],
+  B3: (H) => [["2 dislocations", H.need((it) => it.disloc, 2)], ["1 élément P5 (min.)", H.need((it) => it.p >= 5)], ["1 sortie", H.need((it) => it.sortiekind)]],
+  C2: (H) => [["1 descente", H.need((it) => it.descente)], ["1 élément P5 (min.)", H.need((it) => it.p >= 5)], ["1 sortie", H.need((it) => it.sortiekind)]],
+  C3: (H) => [["1 élément à l'ATR tenu", H.need((it) => it.atr && tenu(it))], ["1 élément P6 (min.)", H.need((it) => it.p >= 6)], ["1 sortie", H.need((it) => it.sortiekind)]],
+};
+const atrTenu = (it) => /ATR/.test(it.name) && tenu(it), atrDemi = (it) => /ATR/.test(it.name) && /1\/2 tour|demi-tour/i.test(it.name);
+TC.paralleles = {
+  A1: (H) => [["1 maintien", H.need(tenu)], ["1 élément P2 (min.)", H.need((it) => it.p >= 2)]],
+  B1: (H) => [["Enchaîner suspension à enchaînement", null], ["1 élément P3 (min.)", H.need((it) => it.p >= 3)]],
+  B2: (H) => [["ATR tenu sur les parallèles", H.need(atrTenu)], ["1 élément P4 (min.)", H.need((it) => it.p >= 4)], ["1 sortie", H.need((it) => it.sortiekind)]],
+  B3: (H) => [["ATR tenu sur les parallèles", H.need(atrTenu)], ["1 élément P4 (min.)", H.need((it) => it.p >= 4)], ["1 sortie avec salto", H.need((it) => it.sortiekind && it.salto)]],
+  C2: (H) => [["ATR 1/2 tour sur les parallèles", H.need(atrDemi)], ["1 élément P5 (min.)", H.need((it) => it.p >= 5)], ["1 sortie avec salto", H.need((it) => it.sortiekind && it.salto)]],
+  C3: (H) => [["ATR 1/2 tour sur les parallèles", H.need(atrDemi)], ["1 élément P6 (min.)", H.need((it) => it.p >= 6)], ["1 sortie avec salto", H.need((it) => it.sortiekind && it.salto)]],
+};
+TC.fixe = Object.fromEntries(GAM_LEVELS.map((l) => [l, () => []]));
+TC.gsaut = {};
+
+const forceMaint = (k) => (H) => H.one((it) => (it.kind === "force" || it.kind === "maintien") && it.p >= k);
+const solAtr = (it) => it.arche === "ATR et force" && it.side === "ATR";
+VALOS.gsol = {
+  A1: VALOS.sol.A1,
+  B1: [V("1 élément des ATR (P2 min.)", (H) => H.one((it) => solAtr(it) && it.p >= 2)),
+    S("1 rondade flip", (H) => H.series((s) => H.isLA(s) && s.some((it) => /^rondade/i.test(it.name)) && s.some((it) => /flic|flip/i.test(it.name)))),
+    S("1 force ou 1 maintien", forceMaint(0)),
+    V("1 saut de mains ou 1 salto avant", (H) => H.one((it) => /saut de mains?/i.test(it.name) || (it.salto && /avant/i.test(it.name)))),
+    V("1 LAE dont 1 élément P3 (min.)", (H) => H.series((s) => H.isLAE(s) && s.some((it) => it.val && it.p >= 3)))],
+  B2: [V("1 LAE dont 1 acro avec appui manuel", (H) => H.series((s) => H.isLAE(s) && s.some((it) => it.appuimanuel))),
+    S("1 LAE de 3 éléments différents", (H) => H.series((s) => H.isLAE(s) && new Set(s.map((x) => x.id)).size >= 3)),
+    S("1 élément de l'arche « force ATR » en P4 (min.)", (H) => H.one((it) => it.arche === "ATR et force" && it.p >= 4)),
+    V("1 salto en P4 (min.)", (H) => H.one((it) => it.salto && it.p >= 4)),
+    V("1 saut P4 (min.) ou 1 élément des cercles P1 (min.)", (H) => H.one((it) => (it.kind === "saut" && it.p >= 4) || (it.arche === "Cercles" && it.p >= 1)))],
+  B3: [V("1 LAE dont 1 salto avec appui manuel", (H) => H.series((s) => H.isLAE(s) && s.some((it) => it.salto) && s.some((it) => it.appuimanuel))),
+    S("1 LAE dont 1 élément P5 (min.)", (H) => H.series((s) => H.isLAE(s) && s.some((it) => it.val && it.p >= 5))),
+    S("1 force ou 1 maintien en P4 (min.)", forceMaint(4)),
+    V("1 salto en P5 (min.)", (H) => H.one((it) => it.salto && it.p >= 5)),
+    V("2 acros dans 2 sens différents avec envol incorporés dans les LAE", (H) => H.twoDirections(true), { shared: true })],
+  C2: [S("1 salto avec rotation longitudinale 360°", (H) => H.one((it) => it.salto && /360|1 tour|1\/1 tour/i.test(it.name))),
+    S("1 LAE de 3 éléments dont 1 élément en P5 (min.)", (H) => H.series((s) => H.isLAE(s) && s.length >= 3 && s.some((it) => it.val && it.p >= 5))),
+    V("1 force ou 1 maintien en P5 (min.)", forceMaint(5)),
+    V("1 acro en P6 (min.)", (H) => H.one((it) => it.kind === "acro" && it.p >= 6)),
+    V("2 acros dans 2 sens différents avec envol incorporés dans les LAE", (H) => H.twoDirections(true), { shared: true }),
+    V("2 salti appel 2 pieds liés directement ou indirectement", (H) => H.twoSalti(0))],
+  C3: [S("1 acro avec double rotation longitudinale", (H) => H.one((it) => it.envol && /double|2\/1|720|2 tours/i.test(it.name))),
+    S("1 LAE de 3 éléments différents dont 1 en P6 (min.)", (H) => H.series((s) => H.isLAE(s) && new Set(s.map((x) => x.id)).size >= 3 && s.some((it) => it.val && it.p >= 6))),
+    V("1 force ou 1 maintien en P6 (min.)", forceMaint(6)),
+    V("1 élément acro en P7", (H) => H.one((it) => it.kind === "acro" && it.p >= 7)),
+    V("2 acros dans 2 sens différents avec envol incorporés dans les LAE", (H) => H.twoDirections(true), { shared: true }),
+    V("2 salti liés dont 1 élément en P5 (min.)", (H) => H.twoSalti(5))],
+};
+// arçons : pas encore de catalogue -> toutes les valorisations sont à juger
+const M = (t) => V(t, MAN), MS = (t) => S(t, MAN);
+VALOS.arcons = {
+  A1: [M("1 élément des élans"), M("1 élément arche champignon P1 (min.)"), M("1 cercle sur champignon"), MS("1 élément arche péda (min.) P2")],
+  B1: [M("Utiliser 2 parties du cheval (1 élément sur chaque)"), M("1 élément arche péda P3 (min.)"), MS("3 cercles (min.) sur champignon"), M("1 élément élan P2 (min.)"), MS("1 élément P4 (min., hors arche champignon)")],
+  B2: [MS("1 cercle"), MS("1 cercle transversal"), M("5 cercles consécutifs (min.) sur champignon, 1 seul élément comptabilisé"), MS("1 élément élan P4 (min.)"), M("1 sortie P2 (min.)")],
+  B3: [M("1 élément arche cercle latéral P3 (min.)"), MS("2 transversaux enchaînés"), MS("Enchaîner au champignon 5 cercles + 1 élément P4 (min.) de l'arche champi"), M("1 élément élan P4 (min.)"), M("1 sortie P4 (min.)")],
+  C2: [M("1 élément arche cercle latéral P4 (min.)"), MS("3 transversaux enchaînés"), M("3 éléments P4 (min.) de champignon (en 1 passage)"), M("1 élément élan P4 (min.)"), MS("1 changement de face"), M("1 sortie P4 (min.)")],
+  C3: [MS("1 élément arche cercle latéral P5 (min.)"), M("1 élément arche cercles transversaux P3 (min.)"), M("1 élément P5 (min.)"), M("1 élément élan P5 (min.)"), MS("1 élément arche cercles transversaux P4 (min.)"), M("1 sortie P5 (min.)")],
+};
+const ann = { atr: (k) => (H) => H.one((it) => it.arche === "Force et maintien" && it.side === "ATR" && it.p >= k),
+  etab: (k) => (H) => H.one((it) => /(bascule|tablissement)/i.test(it.name) && /appui/i.test(it.name) && it.p >= k) };
+VALOS.anneaux = {
+  A1: [V("1 maintien P2", (H) => H.one((it) => tenu(it) && it.p >= 2)), V("1 « suspension » P2", (H) => H.one((it) => it.arche === "Suspension" && it.p >= 2)),
+    S("Enchaîner 3 balancés complets", MAN), V("Utilisation des sangles", MAN)],
+  B1: [V("1 force P3 (min.)", (H) => H.one((it) => (it.side === "Force" || it.side === "Croix") && it.p >= 3)),
+    V("1 PR max dans tout l'enchaînement", (H) => H.items.filter((it) => it.palier === "PR").length <= 1),
+    S("Enchaîner 3 balancés complets", MAN), S("1 élément des ATR P2 (min.)", ann.atr(2)), V("1 dislocation", (H) => H.one((it) => it.disloc))],
+  B2: [S("1 maintien P3 (min.)", (H) => H.one((it) => tenu(it) && it.p >= 3)), V("1 établissement de la suspension à l'appui P3 (min.)", ann.etab(3)),
+    V("2 dislocations de sens différents", (H) => H.k((it) => it.disloc, 2).filter(([a, b]) => H.items[a].arche !== H.items[b].arche || /avant/i.test(H.items[a].name) !== /avant/i.test(H.items[b].name))),
+    S("1 élément des ATR P3 (min.)", ann.atr(3)), V("1 sortie P3 (min.)", (H) => sortieOk(H, 3))],
+  B3: [V("1 maintien P3 (min.)", (H) => H.one((it) => tenu(it) && it.p >= 3)), V("1 établissement de la suspension à l'appui P4 (min.)", ann.etab(4)),
+    V("1 descente (lune / soleil) de l'ATR P3 (min.)", (H) => H.one((it) => it.descente && it.p >= 3)),
+    S("1 élément des ATR P4 (min.)", ann.atr(4)), S("1 sortie P4 (min.)", (H) => sortieOk(H, 4))],
+  C2: [S("1 maintien P5 (min.)", (H) => H.one((it) => tenu(it) && it.p >= 5)), V("1 établissement de la suspension à l'appui P4 (min.)", ann.etab(4)),
+    S("Enchaîner directement 1 élément derrière 1 descente (lune / soleil)", (H) => H.followedBy((a) => a.descente, () => true)),
+    V("1 élément des ATR P5 (min.)", ann.atr(5)), V("1 élément P5 (min.)", (H) => H.one((it) => it.p >= 5)), V("1 sortie P5 (min.)", (H) => sortieOk(H, 5))],
+  C3: [S("1 maintien P6 (min.)", (H) => H.one((it) => tenu(it) && it.p >= 6)), V("1 élément P5 (min.)", (H) => H.one((it) => it.p >= 5)),
+    V("Enchaîner directement 1 élément P4 derrière 1 descente (lune / soleil)", (H) => H.followedBy((a) => a.descente, (b) => b.p >= 4)),
+    V("1 élément P7", (H) => H.one((it) => it.p >= 7)), S("Réaliser 1 grand tour", (H) => H.one((it) => /grand tour/i.test(it.name))), V("1 sortie P5 (min.)", (H) => sortieOk(H, 5))],
+};
+const par = { susp: (k) => (H) => H.one((it) => it.arche === "Élan suspension" && it.p >= k), app: (k) => (H) => H.one((it) => it.arche === "Appuis et maintien" && it.p >= k),
+  force: (k, t) => (H) => H.one((it) => /force/i.test(it.name) && /ATR/.test(it.name) && (!t || tenu(it)) && it.p >= k),
+  demi: (k) => (H) => H.one((it) => atrDemi(it) && it.p >= k), rot360: (H) => H.one((it) => it.rotlong && /360|1\/1|1 tour/i.test(it.name) && it.p >= 4) };
+VALOS.paralleles = {
+  A1: [V("Enchaîner 4 balancés en suspension", MAN), S("Enchaîner 6 balancés en appui", MAN), V("Appuis / maintiens P2 (min.)", par.app(2)), V("1 travail sur porte-mains (PR)", MAN)],
+  B1: [V("Enchaîner 4 balancés en suspension", MAN), V("Enchaîner 6 balancés en appui", MAN), S("Appuis / maintiens P3 (min.)", par.app(3)),
+    S("1 passage à l'ATR P2 (min.)", (H) => H.one((it) => /ATR/.test(it.name) && it.p >= 2)), V("1 élément brachial", (H) => H.one((it) => it.arche === "Brachial"))],
+  B2: [V("1 élan en suspension P3 (min.)", par.susp(3)), S("1 montée en force à l'ATR", par.force(0)), V("De l'ATR 1/2 tour à l'ATR", par.demi(0)),
+    V("1 brachial P3 (min.)", (H) => H.one((it) => it.arche === "Brachial" && it.p >= 3)), S("1 sortie avec salto P3 (min.)", (H) => sortieOk(H, 3, true))],
+  B3: [S("1 élan en suspension P4 (min.)", par.susp(4)), V("1 montée en force à l'ATR tenu P3 (min.)", par.force(3, true)), V("De l'ATR 1/2 tour à l'ATR P3 (min.)", par.demi(3)),
+    V("1 élément P4 (min.)", (H) => H.one((it) => it.p >= 4)), S("1 sortie P4 (min.)", (H) => sortieOk(H, 4))],
+  C2: [S("1 élan en suspension P5 (min.)", par.susp(5)), V("1 montée en force à l'ATR tenu P4 (min.)", par.force(4, true)), V("De l'ATR 1/2 tour à l'ATR P4 (min.)", par.demi(4)),
+    V("1 élément P5 (min.)", (H) => H.one((it) => it.p >= 5)), S("1 élément en appui avec rotation longitudinale 360° P4 (min.)", par.rot360), V("1 sortie P5 (min.)", (H) => sortieOk(H, 5))],
+  C3: [V("1 élan en suspension P5 (min.)", par.susp(5)), V("1 salto à l'appui P5 (min.)", (H) => H.one((it) => it.salto && /appui/i.test(it.name) && it.p >= 5)),
+    V("1 élément des appuis et maintien P5 (min.)", par.app(5)), V("1 élément P6 (min.)", (H) => H.one((it) => it.p >= 6)),
+    S("1 élément en appui avec rotation longitudinale 360° P4 (min.)", par.rot360), S("1 sortie P6 (min.)", (H) => sortieOk(H, 6))],
+};
+VALOS.fixe = Object.fromEntries(GAM_LEVELS.map((l) => [l, []]));
