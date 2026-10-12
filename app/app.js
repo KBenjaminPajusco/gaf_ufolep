@@ -115,9 +115,10 @@ function buildCtx(d, level, app) {
     },
     arches: (n) => {
       const by = new Map(); for (const it of counted) { if (!by.has(it.arche)) by.set(it.arche, []); if (!by.get(it.arche).includes(short(it))) by.get(it.arche).push(short(it)); }
-      return [`${n} arches`, { ok: by.size >= n, why: `${Math.min(by.size, n)}/${n} : ` + ([...by].map(([a, l]) => `${a} (${l.join(", ")})`).join(" · ") || "aucune") }];
+      const groups = [...new Set(counted.map((it) => it.arche))].map((a) => [a, counted.filter((it) => it.arche === a)]);
+      return [`${n} arches`, { ok: by.size >= n, groups, why: `${Math.min(by.size, n)}/${n} : ` + ([...by].map(([a, l]) => `${a} (${l.join(", ")})`).join(" · ") || "aucune") }];
     },
-    count: (a, b) => { const c = new Set(counted.map((it) => it.id)).size; return [`${a} à ${b} éléments`, { ok: c >= a && c <= b, why: `${c} élément${c > 1 ? "s" : ""} reconnu${c > 1 ? "s" : ""}${c > b ? ` (${c - b} de trop)` : ""}` }]; },
+    count: (a, b) => { const c = new Set(counted.map((it) => it.id)).size; return [`${a} à ${b} éléments`, { ok: c >= a && c <= b, items: counted, why: `${c} élément${c > 1 ? "s" : ""} reconnu${c > 1 ? "s" : ""}${c > b ? ` (${c - b} de trop)` : ""}` }]; },
     has: (pred) => counted.some(pred),
     n: (pred) => counted.filter(pred).length,
     bothBars: () => counted.some((it) => it.bar === "BI") && counted.some((it) => it.bar === "BS"),
@@ -192,7 +193,7 @@ function evaluate(d, level = state.level, app = state.app) {
   const tc = tcSpec.map(([t, c, w], k) => {
     const m = man["tc" + k];
     const ok = typeof c === "object" ? c.ok : !!c, why = typeof c === "object" ? describe(c) : w;
-    return { t, auto: ok, why, ok: m === "ok" ? true : m === "ko" ? false : !!ok, forced: m };
+    return { t, auto: ok, why, ok: m === "ok" ? true : m === "ko" ? false : !!ok, forced: m, c: typeof c === "object" ? c : null };
   });
   const vSpec = VALOS[app][level];
   const vals = vSpec.map((v, k) => {
@@ -388,6 +389,7 @@ function renderDetail() {
   const ev = m ? embedUrl(m.url) : null;
   const statusTxt = st.val ? "Valorisable en " + state.level : st.aut ? "Autorisé en " + state.level + " (ne rapporte pas de valorisation)" : "Hors niveau en " + state.level;
   dlg.innerHTML = `<form method="dialog" class="dlg">
+    ${state.fromReq ? `<button type="button" class="linkbtn" data-req="${state.fromReq}">← Retour au barème</button>` : ""}
     <header><div>${palBadge(e, st)} <span class="muted">${esc(e.arche)}${e.side ? " · " + esc(e.side) : ""} · n° ${esc(e.num)}</span></div><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
     <h3>${esc(e.name)}</h3>
     ${e.img ? `<img class="big" src="img/${e.id}.webp" alt="Pictogramme de la brochure : ${esc(e.name)}">` : ""}
@@ -494,8 +496,53 @@ function reqRow(kind, k, r, extra) {
   const hint = r.forced ? "réglé à la main · toucher pour changer" : r.manual ? "à juger : toucher pour valider" : "auto · toucher pour forcer";
   return `<div class="req ${cls} ${extra?.kept ? "kept" : ""}">
     <button class="st" type="button" data-man="${kind}${k}" title="${hint}" aria-label="${esc(r.t)} : ${hint}">${sym}</button>
-    <div><div>${r.s ? `<span class="star">(*) </span>` : ""}${esc(r.t)}</div>${extra?.why ? `<div class="why">${esc(extra.why)}</div>` : ""}</div>
+    <button type="button" class="req-open" data-req="${kind}${k}" title="Voir le détail"><span>${r.s ? `<span class="star">(*) </span>` : ""}${esc(r.t)}</span>${extra?.why ? `<span class="why">${esc(extra.why)}</span>` : ""}</button>
     <span class="p">${extra?.pts ?? ""}</span></div>`;
+}
+
+// détail d'une exigence (tronc commun ou valorisation) dans une fenêtre
+function openReqDetail(key) {
+  const d = draft(), ev = evaluate(d), H = ev.H;
+  const isTc = key.startsWith("tc"), k = Number(key.replace(/\D/g, ""));
+  const r = isTc ? ev.tc[k] : ev.vals[k]; if (!r) return;
+  const elRow = (it) => `<li><button type="button" class="dl-el" data-detail="${it.id}" data-pos="${it.i}">
+      ${it.img ? `<img src="img/${it.id}.webp" alt="" loading="lazy">` : ""}${palBadge(it, { aut: it.aut, val: it.val })}
+      <span><b>${esc(it.name)}</b><small>n° ${it.i + 1} dans l'enchaînement · ${esc(it.arche)}${it.side ? " · " + esc(it.side) : ""}</small></span></button></li>`;
+  const list = (its) => its.length ? `<ul class="dl-list">${its.map(elRow).join("")}</ul>` : "";
+  const uniq = (its) => its.filter((it, x) => its.findIndex((o) => o.i === it.i) === x);
+  let status, body = "";
+  if (isTc) {
+    status = r.ok ? ["ok", "Exigence remplie · +1"] : ["ko", "Exigence non remplie · 0"];
+    const c = r.c || {};
+    if (r.why) body += `<p class="dl-why">${esc(r.why)}</p>`;
+    if (c.groups) body += c.groups.map(([a, its]) => `<h4>${esc(a)}</h4>${list(its)}`).join("");
+    else if (c.items?.length) body += `<h4>Mouvements concernés</h4>${list(uniq(c.items))}`;
+    else body += `<p class="muted">Aucun mouvement de l'enchaînement ne remplit cette exigence.</p>`;
+  } else {
+    status = r.kept ? ["ok", `Valorisation retenue · +${r.pts}`] : r.ok ? ["warn", `Possible mais pas retenue · ${r.pts} pts`] : r.manual && !r.forced ? ["warn", `À juger · ${r.pts} pts`] : ["ko", `Non validée · ${r.pts} pts`];
+    const its = (w) => (w || []).map((i) => H.items[i]).filter(Boolean);
+    if (r.kept && r.use?.length) body += `<h4>Retenue avec</h4>${list(its(r.use))}`;
+    else if (r.kept) body += `<p class="muted">Validée à la main.</p>`;
+    const others = r.wit.filter((w) => w.length && w !== r.use).slice(0, 6);
+    if (others.length) body += `<h4>${r.kept ? "Autres possibilités" : "Possibilités"}</h4>` + others.map((w) => `<div class="dl-combo">${list(its(w))}</div>`).join("");
+    if (!r.ok && !r.manual) body += `<p class="muted">Aucune combinaison de l'enchaînement ne remplit cette valorisation.</p>`;
+    if (r.manual && !r.forced) body += `<p class="muted">Cette valorisation demande un jugement : l'appli ne peut pas la vérifier seule. Valide-la à la main si elle est réalisée.</p>`;
+    body += `<p class="note-foot">Une valorisation est validée même avec une chute. Elle ne peut pas contenir d'élément nomade et doit utiliser des éléments distincts des autres valorisations${state.app === "sol" ? " (sauf « 2 acros de sens différents »)" : ""}.</p>`;
+  }
+  const man = d.manual[key];
+  const dlg = $("#detail");
+  dlg.innerHTML = `<form method="dialog" class="dlg">
+    <header><span class="muted">${isTc ? "Tronc commun" : "Valorisation" + (r.s ? " principale (*)" : "")}</span><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
+    <h3>${esc(r.t)}</h3>
+    <div class="dl-status ${status[0]}">${status[1]}</div>
+    ${body}
+    <div class="dl-man"><span class="muted">Statut :</span><div class="seg">
+      <button type="button" data-manset="${key}:" aria-pressed="${!man}">Automatique</button>
+      <button type="button" data-manset="${key}:ok" aria-pressed="${man === "ok"}">Valider à la main</button>
+      <button type="button" data-manset="${key}:ko" aria-pressed="${man === "ko"}">Refuser</button></div></div>
+  </form>`;
+  dlg._req = key;
+  if (!dlg.open) dlg.showModal();
 }
 
 function renderNote() {
@@ -808,7 +855,13 @@ document.addEventListener("click", async (e) => {
   else if (ds.app) { state.app = ds.app; }
   else if (ds.view || ds.go) { state.view = ds.view || ds.go; window.scrollTo({ top: 0 }); }
   else if (ds.filter) state.filter = ds.filter;
-  else if (ds.detail) { e.preventDefault(); state.detail = ds.detail; state.detailPos = ds.pos != null ? Number(ds.pos) : null; renderDetail(); return; }
+  else if (ds.req) { state.detail = null; openReqDetail(ds.req); return; }
+  else if ("manset" in ds) {
+    const [key, v] = ds.manset.split(":");
+    if (v) d.manual[key] = v; else delete d.manual[key];
+    render(); openReqDetail(key); return;
+  }
+  else if (ds.detail) { e.preventDefault(); state.fromReq = b.closest("#detail") ? $("#detail")._req || null : null; state.detail = ds.detail; state.detailPos = ds.pos != null ? Number(ds.pos) : null; renderDetail(); return; }
   else if ("archePick" in ds) { F().arche = ds.archePick; F().side = ""; F().kind = ""; }
   else if (ds.fpal) { const a = F().pal; a.includes(ds.fpal) ? a.splice(a.indexOf(ds.fpal), 1) : a.push(ds.fpal); }
   else if (ds.fkind) F().kind = F().kind === ds.fkind ? "" : ds.fkind;
@@ -919,7 +972,7 @@ document.addEventListener("mouseover", (e) => {
   const id = n ? n.dataset.id || n.dataset.eid : null;
   if (id !== hoverLink.cur) { hoverLink.cur = id; hoverLink(id, !!n && !n.classList.contains("rt-item")); }
 });
-$("#detail")?.addEventListener("close", () => { state.detail = null; state.detailPos = null; });
+$("#detail")?.addEventListener("close", () => { state.detail = null; state.detailPos = null; state.fromReq = null; $("#detail")._req = null; });
 document.addEventListener("input", (e) => {
   const t = e.target, d = draft();
   if (t.id === "q") { state.q = t.value; const pos = t.selectionStart; renderCatalogue(); const q = $("#q"); q.focus(); q.setSelectionRange(pos, pos); persist(); }
