@@ -649,22 +649,6 @@ async function previewImport() {
   } catch (err) { box.innerHTML = $("#impCode").value.trim() ? `<p class="imp-err">${esc(err.message)}</p>` : ""; return null; }
 }
 
-// sauvegarde complète en fichier (au cas où le navigateur perd ses données)
-function exportAll() {
-  const blob = new Blob([JSON.stringify({ palier: 1, exported: new Date().toISOString(), routines: STORE.get(K_ROUT), media: Media.all() }, null, 1)], { type: "application/json" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-  a.download = `palier-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`; a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-}
-async function importFile(file) {
-  const data = JSON.parse(await file.text());
-  if (data.palier !== 1 || typeof data.routines !== "object") throw new Error("fichier de sauvegarde non reconnu");
-  const db = STORE.get(K_ROUT); let n = 0;
-  for (const r of Object.values(data.routines)) if (r?.id && !db[r.id]) { db[r.id] = r; n++; }
-  STORE.set(K_ROUT, db);
-  const md = Media.all(); Object.assign(md, data.media || {}); STORE.set(K_MEDIA, md);
-  return n;
-}
 
 // ---------- enregistrements (dans le navigateur) ----------
 let SAVED = null; // liste des enchaînements du serveur (cache)
@@ -781,9 +765,8 @@ async function renderRecap() {
   let html = `<div class="recap-head"><h2>Mes enchaînements</h2>
     <div class="recap-actions"><button class="btn primary big" type="button" data-act="create">+ Créer un enchaînement</button>
     <button class="btn" type="button" data-act="import">Importer un code</button>
-    <button class="btn" type="button" data-act="export" title="Fichier de sauvegarde de tous tes enchaînements">Sauvegarder (fichier)</button>
-    <label class="btn" for="impFile">Restaurer (fichier)</label><input id="impFile" type="file" accept=".json,application/json" hidden></div></div>
-  <p class="muted note-store">Tes enchaînements sont gardés dans ce navigateur, sur cet appareil. Pour les retrouver ailleurs, partage-les avec un code ou fais une sauvegarde en fichier.</p>
+</div></div>
+  <p class="muted note-store">Tes enchaînements sont gardés dans ce navigateur, sur cet appareil. Pour les retrouver ailleurs, partage-les avec un code.</p>
   <div class="tools">
     <input class="search" id="rq" type="search" placeholder="Chercher un nom ou une gymnaste" value="${esc(rf.q)}" aria-label="Chercher un enchaînement">
   </div>
@@ -895,7 +878,7 @@ document.addEventListener("click", async (e) => {
     const { lost, ...rr } = r; rr.updated = new Date().toISOString(); rr.name = rr.name || "Enchaînement reçu";
     Routines.put(rr); $("#detail").close(); history.replaceState(null, "", location.pathname);
     SAVED = null; toast(`Importé : ${rr.name}`);
-  } else if (ds.act === "export") { exportAll(); toast("Fichier de sauvegarde téléchargé"); return; }
+  }
   else if ("rapp" in ds) (state.rf ||= {}).app = ds.rapp;
   else if ("rlvl" in ds) (state.rf ||= {}).level = ds.rlvl;
   else if (ds.ropen) {
@@ -947,10 +930,7 @@ document.addEventListener("change", async (e) => {
     const old = draftKey(); state.level = t.value; d.level = t.value;
     delete state.drafts[old]; state.drafts[draftKey()] = d; render(); toast(`Niveau ${t.value} : note recalculée`); return;
   }
-  if (t.id === "impFile" && t.files[0]) {
-    try { const n = await importFile(t.files[0]); toast(`${n} enchaînement(s) restauré(s)`); } catch (err) { toast("Échec : " + err.message); }
-    SAVED = null; t.value = ""; render(); return;
-  }
+
   if (t.dataset.jump) d.jumps[t.dataset.jump].id = t.value;
   else if (t.dataset.jded) d.jumps[t.dataset.jded].ded = Number(t.value) || 0;
   else if (t.dataset.svpts) (d.svalos[t.dataset.svpts] ||= {}).pts = t.value;

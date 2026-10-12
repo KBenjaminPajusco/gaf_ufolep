@@ -16,7 +16,6 @@ hébergeable n'importe où (GitHub Pages, Netlify…) ; `server.py` sert juste �
 
 - Enchaînements et liens vidéo : stockés dans le navigateur (localStorage `palier-routines-v1`, `palier-media-v1`).
 - Partage : code `PAL1-…` (JSON compressé deflate-raw + base64url, ~200 caractères) ou lien `…/#code=PAL1-…`.
-- Sauvegarde/restauration : fichier JSON depuis « Mes enchaînements ».
 - Version 2 prévue : base de données, comptes gymnaste/coach.
 
 ## Contenu
