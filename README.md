@@ -1,5 +1,7 @@
 # Palier — enchaînements GAF UFOLEP
 
+En ligne : https://benjamin.pajusco.fr/gaf_ufolep/ (GitHub Pages, déployé par .github/workflows/pages.yml à chaque push sur main).
+
 Appli web (installable sur téléphone) pour construire un enchaînement GAF et estimer sa note
 selon le **Programme Technique GAF UFOLEP du 29/09/2026**.
 
