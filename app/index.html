@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Palier · GAF UFOLEP</title>
+<meta name="description" content="Construis et évalue tes enchaînements GAF selon le Programme Technique UFOLEP 2026.">
+<meta name="theme-color" content="#14161c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo" aria-hidden="true"></span>
+    <div>
+      <h1>Palier</h1>
+      <p class="sub">GAF UFOLEP · programme sept. 2026</p>
+    </div>
+    <nav class="pages" aria-label="Pages">
+      <button type="button" class="nav-btn to-recap" data-page="recap">Mes enchaînements</button>
+      <button type="button" class="nav-btn to-edit" data-page="edit">← Éditeur</button>
+    </nav>
+    <button class="score-pill" id="scorePill" type="button" data-go="note" aria-label="Voir la note"></button>
+  </div>
+  <nav class="levels" id="levels" aria-label="Niveau"></nav>
+  <nav class="apps" id="apps" aria-label="Agrès"></nav>
+</header>
+
+<section class="recap" id="page-recap" aria-label="Mes enchaînements" hidden></section>
+
+<main class="layout" id="layout">
+  <section class="pane" id="pane-catalogue" aria-labelledby="h-cat"></section>
+  <div class="side" id="side">
+    <section class="pane" id="pane-routine" aria-labelledby="h-rout"></section>
+    <section class="pane" id="pane-note" aria-labelledby="h-note"></section>
+  </div>
+</main>
+
+<nav class="tabbar" id="tabbar" aria-label="Vues">
+  <button type="button" data-view="catalogue">Mouvements</button>
+  <button type="button" data-view="routine">Enchaînement <span class="count" id="tabCount"></span></button>
+  <button type="button" data-view="note">Note</button>
+</nav>
+
+<dialog id="detail" aria-label="Fiche du mouvement"></dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="vendor/Sortable.min.js"></script>
+<script src="rules.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

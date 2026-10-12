@@ -1,0 +1,9 @@
+# brochure UFOLEP (PDF) et rendus intermédiaires : non publiés
+source/
+.venv/
+__pycache__/
+data/
+tools/*.png
+tools/raw.txt
+tools/rules.txt
+tools/capsules.txt
