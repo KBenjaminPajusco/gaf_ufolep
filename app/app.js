@@ -428,6 +428,7 @@ function renderDetail() {
     ${e.app === "saut" ? "" : state.detailPos != null && draft().items[state.detailPos]?.id === e.id
       ? `<div class="pos-row"><span>Élément n° ${state.detailPos + 1} de l'enchaînement</span><button class="btn danger" type="button" data-delpos="${state.detailPos}">Retirer de l'enchaînement</button></div>
          <button class="btn wide" type="button" data-add="${e.id}">L'ajouter encore une fois à la fin</button>`
+      : state.fromReq ? `<button class="btn primary wide" type="button" data-sadd="${e.id}:${state.sgLink || "none"}">Ajouter à l'enchaînement${state.sgLink === "direct" ? " (lié à l'élément précédent)" : ""}</button>`
       : `<button class="btn primary wide" type="button" data-add="${e.id}">Ajouter à l'enchaînement</button>`}
   </form>`;
   if (!dlg.open) dlg.showModal();
@@ -561,9 +562,10 @@ function openReqDetail(key) {
   const order = (e) => (e.palier === "NOMADE" ? 9 : PAL_NUM[e.palier]);
   const groups = new Map();
   for (const x of sg.list.sort((a, b) => order(a.e) - order(b.e))) { if (!groups.has(x.e.arche)) groups.set(x.e.arche, []); groups.get(x.e.arche).push(x); }
-  const card = ({ e, link }) => { const st = status(e); return `<li><button type="button" class="sg-el" data-sadd="${e.id}:${link}" title="Ajouter à l'enchaînement">
+  const card = ({ e, link }) => { const st = status(e); return `<li class="sg-row"><button type="button" class="sg-el" data-detail="${e.id}" data-sglink="${link}" title="Voir la fiche">
       ${e.img ? `<img src="img/${e.id}.webp" alt="" loading="lazy">` : ""}${palBadge(e, st)}
-      <span><b>${esc(e.name)}</b>${link === "direct" ? `<small>lié à l'élément précédent</small>` : ""}</span><span class="sg-add" aria-hidden="true">+</span></button></li>`; };
+      <span><b>${esc(e.name)}</b>${link === "direct" ? `<small>lié à l'élément précédent</small>` : ""}</span></button>
+      <button type="button" class="sg-add" data-sadd="${e.id}:${link}" aria-label="Ajouter ${esc(e.name)} à l'enchaînement">+</button></li>`; };
   let body;
   if (r.manual && !r.forced) body = `<p class="muted">L'appli ne peut pas vérifier cette exigence seule. Touche le rond à gauche de la ligne dans le barème pour la cocher si elle est réalisée.</p>`;
   else if (sg.info) body = `<p class="muted">${esc(sg.info)}</p>`;
@@ -900,9 +902,10 @@ document.addEventListener("click", async (e) => {
   else if (ds.sadd) {
     const [id, link] = ds.sadd.split(":"); const prev = d.items.at(-1);
     d.items.push({ id, link: d.items.length ? link : "none", bar: prev?.bar || "BI" });
-    render(); toast(`Ajouté : ${BY_ID[id].name.slice(0, 40)}`); openReqDetail($("#detail")._req); return;
+    const back = state.fromReq || $("#detail")._req; state.detail = null; state.fromReq = null;
+    render(); toast(`Ajouté : ${BY_ID[id].name.slice(0, 40)}`); openReqDetail(back); return;
   }
-  else if (ds.detail) { e.preventDefault(); state.fromReq = b.closest("#detail") ? $("#detail")._req || null : null; state.detail = ds.detail; state.detailPos = ds.pos != null ? Number(ds.pos) : null; renderDetail(); return; }
+  else if (ds.detail) { e.preventDefault(); state.fromReq = b.closest("#detail") ? $("#detail")._req || null : null; state.sgLink = ds.sglink || null; state.detail = ds.detail; state.detailPos = ds.pos != null ? Number(ds.pos) : null; renderDetail(); return; }
   else if ("archePick" in ds) { F().arche = ds.archePick; F().side = ""; F().kind = ""; }
   else if (ds.fpal) { const a = F().pal; a.includes(ds.fpal) ? a.splice(a.indexOf(ds.fpal), 1) : a.push(ds.fpal); }
   else if (ds.fkind) F().kind = F().kind === ds.fkind ? "" : ds.fkind;

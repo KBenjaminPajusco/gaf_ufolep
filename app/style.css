@@ -593,3 +593,9 @@ dialog#detail { overflow-y: auto; overscroll-behavior: contain; }
 }
 .dlg > header .mini.icon { width: 36px; height: 36px; font-size: 20px; border-radius: 50%; }
 
+
+.sg-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.sg-el { grid-template-columns: auto auto minmax(0, 1fr); }
+button.sg-add { border: 0; width: 40px; height: 40px; cursor: pointer; font-size: 22px; }
+button.sg-add:hover, button.sg-add:focus-visible { filter: brightness(1.1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--app) 30%, transparent); }
+
