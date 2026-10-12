@@ -846,6 +846,15 @@ async function renderRecap() {
   if (SAVED === null) { box.innerHTML = `<p class="empty">Chargement…</p>`; await loadSaved(); }
   if (SAVED === null) { box.innerHTML = `<p class="empty">Le navigateur bloque le stockage local : les enchaînements ne peuvent pas être gardés ici.</p>`; return; }
   const rf = (state.rf ||= { q: "", app: "", level: "" });
+  // filtres : seulement ce qu'on possède (un filtre devenu vide est remis à « tous »)
+  const discs = ["GAF", "GAM"].filter((x) => SAVED.some((r) => APP(r.app).disc === x));
+  if (rf.disc && !discs.includes(rf.disc)) rf.disc = "";
+  const inDisc = SAVED.filter((r) => !rf.disc || APP(r.app).disc === rf.disc);
+  const ownApps = APPS.filter((a) => inDisc.some((r) => r.app === a.id));
+  if (rf.app && !ownApps.some((a) => a.id === rf.app)) rf.app = "";
+  const inApp = inDisc.filter((r) => !rf.app || r.app === rf.app);
+  const ownLvls = LEVELS.filter((l) => inApp.some((r) => r.level === l));
+  if (rf.level && !ownLvls.includes(rf.level)) rf.level = "";
   const q = rf.q.trim().toLowerCase();
   const list = SAVED.filter((r) => BY_ID && (!rf.disc || APP(r.app).disc === rf.disc) && (!rf.app || r.app === rf.app) && (!rf.level || r.level === rf.level)
     && (!q || `${r.name} ${r.gym || ""}`.toLowerCase().includes(q)));
@@ -864,9 +873,9 @@ async function renderRecap() {
     <input class="search" id="rq" type="search" placeholder="Chercher un nom ou une gymnaste" value="${esc(rf.q)}" aria-label="Chercher un enchaînement">
   </div>
   <div class="filters-inline">
-    <div class="frow"><span class="flabel">Discipline</span>${chip("data-rdisc", "", !rf.disc, "Toutes")}${["GAF", "GAM"].map((x) => chip("data-rdisc", x, rf.disc === x, x)).join("")}</div>
-    <div class="frow"><span class="flabel">Agrès</span>${chip("data-rapp", "", !rf.app, "Tous")}${APPS.filter((a) => !rf.disc || a.disc === rf.disc).map((a) => chip("data-rapp", a.id, rf.app === a.id, rf.disc ? a.label : appName(a.id))).join("")}</div>
-    <div class="frow"><span class="flabel">Niveau</span>${chip("data-rlvl", "", !rf.level, "Tous")}${LEVELS.map((l) => chip("data-rlvl", l, rf.level === l, l)).join("")}</div>
+    ${discs.length > 1 ? `<div class="frow"><span class="flabel">Discipline</span>${chip("data-rdisc", "", !rf.disc, "Toutes")}${discs.map((x) => chip("data-rdisc", x, rf.disc === x, x)).join("")}</div>` : ""}
+    ${ownApps.length > 1 ? `<div class="frow"><span class="flabel">Agrès</span>${chip("data-rapp", "", !rf.app, "Tous")}${ownApps.map((a) => chip("data-rapp", a.id, rf.app === a.id, discs.length > 1 && !rf.disc ? appName(a.id) : a.label)).join("")}</div>` : ""}
+    ${ownLvls.length > 1 ? `<div class="frow"><span class="flabel">Niveau</span>${chip("data-rlvl", "", !rf.level, "Tous")}${ownLvls.map((l) => chip("data-rlvl", l, rf.level === l, l)).join("")}</div>` : ""}
   </div>`;
   if (!SAVED.length) html += `<p class="empty">Aucun enchaînement pour l'instant.<br>Touche <b>Créer un enchaînement</b>, choisis l'agrès et le niveau : il sera enregistré ici automatiquement, au fil de tes modifications.</p>`;
   else if (!list.length) html += `<p class="empty">Aucun enchaînement ne correspond à ces filtres.</p>`;
