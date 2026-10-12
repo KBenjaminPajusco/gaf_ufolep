@@ -228,16 +228,17 @@ function evaluateSaut(d, level = state.level) {
 
 // ---------- rendu ----------
 function render() {
-  const recap = state.page === "recap";
-  document.body.classList.toggle("on-recap", recap);
-  $("#page-recap").hidden = !recap;
-  document.querySelectorAll("[data-page]").forEach((b) => b.setAttribute("aria-pressed", (b.dataset.page === "recap") === recap));
-  if (recap) { renderRecap(); persist(); return; }
+  const home = state.page !== "edit";
+  document.body.classList.toggle("on-recap", home);
+  $("#page-recap").hidden = !home;
+  if (home) { $("#ctxbar").innerHTML = ""; renderRecap(); persist(); return; }
   const lvlColor = `var(--${state.level})`;
   document.documentElement.style.setProperty("--lvl", lvlColor);
   document.documentElement.style.setProperty("--app", APPS.find((a) => a.id === state.app).color);
-  $("#levels").innerHTML = LEVELS.map((l) => `<button type="button" data-level="${l}" style="--c:var(--${l})" aria-pressed="${l === state.level}">${l}</button>`).join("");
-  $("#apps").innerHTML = APPS.map((a) => `<button type="button" data-app="${a.id}" style="--c:${a.color}" aria-pressed="${a.id === state.app}">${a.label}</button>`).join("");
+  const app = APPS.find((a) => a.id === state.app);
+  $("#ctxbar").innerHTML = `<span class="ctx-app" style="--c:${app.color}">${app.label}</span>
+    <label class="ctx-lvl" style="--c:var(--${state.level})"><span class="sr">Niveau</span><select id="ctxLevel" aria-label="Niveau de l'enchaînement">${LEVELS.map((l) => `<option value="${l}" ${l === state.level ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    <span class="ctx-name">${esc(draft().name || "Sans nom")}</span>`;
   document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.id === "pane-" + state.view));
   document.querySelectorAll("#tabbar button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === state.view));
   renderCatalogue();
@@ -411,14 +412,13 @@ function renderRoutine() {
     <div class="rt-head">
       <input id="rtName" type="text" placeholder="Nom (ex. Régional 2027)" value="${esc(d.name)}" aria-label="Nom de l'enchaînement">
       <input id="rtGym" type="text" placeholder="Gymnaste" value="${esc(d.gym || "")}" aria-label="Gymnaste" list="gymList">
-      ${d.saved ? "" : `<button class="btn primary" type="button" data-act="save">Enregistrer</button>`}
       <button class="btn" type="button" data-act="share">Partager</button>
-      <button class="btn" type="button" data-act="new">Nouveau</button>
+      <button class="btn" type="button" data-act="create">Nouveau</button>
     </div>
     <datalist id="gymList">${[...new Set((SAVED || []).map((r) => r.gym).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join("")}</datalist>
     <div id="saveState" class="save-state"></div>`;
   html += `<ol class="rt-list" id="rtList">`;
-  if (!d.items.length) html += `<li class="empty ph">Glisse des mouvements ici, ou touche + dans le catalogue.<br>Ils s'affichent dans l'ordre de passage ; glisse-les pour changer l'ordre.<br><br><button class="btn" type="button" data-act="example">Voir un exemple ${EXAMPLES[state.app].label}</button></li>`;
+  if (!d.items.length) html += `<li class="empty ph">Glisse des mouvements ici, ou touche + dans le catalogue.<br>Ils s'affichent dans l'ordre de passage ; glisse-les pour changer l'ordre.<br><br>${EXAMPLES[state.app].level === state.level ? `<button class="btn" type="button" data-act="example">Remplir avec l'exemple ${EXAMPLES[state.app].label}</button>` : ""}</li>`;
   else {
     H.items.forEach((it, k) => {
       const st = { aut: it.aut, val: it.val };
@@ -439,7 +439,7 @@ function renderRoutine() {
   }
   html += `</ol></div>`;
   if (ev.warns.length) html += `<ul class="warn-list">${ev.warns.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>`;
-  html += `<button class="btn wide" type="button" data-page="recap">Voir tous mes enchaînements${SAVED?.length ? ` (${SAVED.length})` : ""} →</button></div>`;
+  html += `<button class="btn wide" type="button" data-page="home">← Tous mes enchaînements${SAVED?.length ? ` (${SAVED.length})` : ""} →</button></div>`;
   $("#pane-routine").innerHTML = html;
   $("#tabCount").textContent = d.items.length || "";
   initRoutineDnD(d);
@@ -707,6 +707,53 @@ async function stashIfNeeded(d, app, level) {
   try { Routines.put({ ...payload(d, app, level), name, app, level, updated: new Date().toISOString() }); return true; } catch { return false; }
 }
 
+// ---------- créer / ouvrir un enchaînement ----------
+function newRoutine(app, level, name, gym) {
+  const label = APPS.find((a) => a.id === app).label;
+  const r = { id: uid(), app, level, name: name || `${label} ${level}`, gym: gym || "", items: [], manual: {}, ded: { p: 0, m: 0, g: 0, c: 0 },
+    jumps: [{ id: "", ded: 0 }, { id: "", ded: 0 }], svalos: {}, updated: new Date().toISOString() };
+  Routines.put(r); SAVED = null;
+  return r;
+}
+function openRoutine(r) {
+  state.level = r.level; state.app = r.app;
+  const d = { manual: {}, ded: { p: 0, m: 0, g: 0, c: 0 }, jumps: [{ id: "", ded: 0 }, { id: "", ded: 0 }], svalos: {}, items: [], ...structuredClone(r), saved: r.updated || new Date().toISOString() };
+  d._last = JSON.stringify(payload(d));
+  state.drafts[draftKey()] = d;
+  state.page = "edit"; state.view = "catalogue"; history.replaceState(null, "", location.pathname + "#edit");
+  render(); window.scrollTo({ top: 0 });
+}
+function openCreate(keep) {
+  const dlg = $("#detail");
+  if (!keep) { dlg._app = null; dlg._lvl = null; dlg._name = ""; dlg._gym = ""; }
+  const app = APPS.find((a) => a.id === dlg._app);
+  dlg.innerHTML = `<form method="dialog" class="dlg create">
+    <header><h3>Créer un enchaînement</h3><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
+    <h4>1 · Agrès</h4>
+    <div class="ctiles">${APPS.map((a) => `<button type="button" class="ctile" data-capp="${a.id}" style="--c:${a.color}" aria-pressed="${dlg._app === a.id}">${a.label}</button>`).join("")}</div>
+    <h4>2 · Niveau</h4>
+    <div class="ltiles">${LEVELS.map((l) => `<button type="button" class="ltile" data-clvl="${l}" style="--c:var(--${l})" aria-pressed="${dlg._lvl === l}">${l}</button>`).join("")}</div>
+    <h4>3 · Nom et gymnaste <span class="muted">(facultatif)</span></h4>
+    <div class="vrow"><input id="cName" type="text" placeholder="${app ? `${app.label} ${dlg._lvl || ""}`.trim() : "Nom"}" value="${esc(dlg._name || "")}" aria-label="Nom">
+      <input id="cGym" type="text" placeholder="Gymnaste" value="${esc(dlg._gym || "")}" list="gymList2" aria-label="Gymnaste"></div>
+    <datalist id="gymList2">${[...new Set(Routines.all().map((r) => r.gym).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join("")}</datalist>
+    <button class="btn primary wide" type="button" data-act="docreate" ${dlg._app && dlg._lvl ? "" : "disabled"}>${dlg._app && dlg._lvl ? `Créer · ${app.label} ${dlg._lvl}` : "Choisis l'agrès et le niveau"}</button>
+  </form>`;
+  if (!dlg.open) dlg.showModal();
+}
+// anciens brouillons (avant l'enregistrement automatique) : on les range dans « Mes enchaînements »
+function migrateDrafts() {
+  for (const [k, dr] of Object.entries(state.drafts)) {
+    const [app, level] = k.split(":");
+    dr.app ||= app; dr.level ||= level;
+    if (dr.saved) continue;
+    if (!(dr.items?.length || dr.jumps?.some((j) => j.id))) { delete state.drafts[k]; continue; }
+    dr.name ||= `${APPS.find((a) => a.id === app)?.label} ${level}`;
+    dr.updated = dr.saved = new Date().toISOString();
+    try { Routines.put(payload(dr, app, level)); dr._last = JSON.stringify(payload(dr)); } catch { /* stockage indisponible */ }
+  }
+}
+
 // ---------- page « Mes enchaînements » ----------
 function summary(r) {
   if (r.app === "saut") { const ev = evaluateSaut(r, r.level); return { main: fmt(ev.final), sub: "meilleur saut + valorisations", tc: "" }; }
@@ -728,7 +775,7 @@ async function renderRecap() {
   const date = (iso) => iso ? new Date(iso).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
 
   let html = `<div class="recap-head"><h2>Mes enchaînements <span class="muted">${SAVED.length}</span></h2>
-    <div class="recap-actions"><button class="btn primary" type="button" data-page="edit">+ Nouvel enchaînement</button>
+    <div class="recap-actions"><button class="btn primary big" type="button" data-act="create">+ Créer un enchaînement</button>
     <button class="btn" type="button" data-act="import">Importer un code</button>
     <button class="btn" type="button" data-act="export" title="Fichier de sauvegarde de tous tes enchaînements">Sauvegarder (fichier)</button>
     <label class="btn" for="impFile">Restaurer (fichier)</label><input id="impFile" type="file" accept=".json,application/json" hidden></div></div>
@@ -740,7 +787,7 @@ async function renderRecap() {
     <div class="frow"><span class="flabel">Agrès</span>${chip("data-rapp", "", !rf.app, "Tous")}${APPS.map((a) => chip("data-rapp", a.id, rf.app === a.id, a.label)).join("")}</div>
     <div class="frow"><span class="flabel">Niveau</span>${chip("data-rlvl", "", !rf.level, "Tous")}${LEVELS.map((l) => chip("data-rlvl", l, rf.level === l, l)).join("")}</div>
   </div>`;
-  if (!SAVED.length) html += `<p class="empty">Aucun enchaînement enregistré pour l'instant.<br>Dans l'éditeur, donne un nom à ton enchaînement puis touche <b>Enregistrer</b> : il apparaîtra ici et se sauvegardera ensuite tout seul.</p>`;
+  if (!SAVED.length) html += `<p class="empty">Aucun enchaînement pour l'instant.<br>Touche <b>Créer un enchaînement</b>, choisis l'agrès et le niveau : il sera enregistré ici automatiquement, au fil de tes modifications.</p>`;
   else if (!list.length) html += `<p class="empty">Aucun enchaînement ne correspond à ces filtres.</p>`;
   for (const g of names) {
     html += `<section class="gym-group"><h3>${g ? esc(g) : "Sans gymnaste"} <span class="muted">${groups[g].length}</span></h3><ul class="rcards">`;
@@ -817,20 +864,16 @@ document.addEventListener("click", async (e) => {
     const items = ex.items.map(([re, pal, o]) => ({ id: find(re, pal), link: "none", bar: "BI", ...o })).filter((x) => x.id);
     state.drafts[draftKey()] = { ...draft(), name: `Exemple ${ex.label}`, items };
     toast(`Exemple ${ex.label} chargé`);
-  } else if (ds.act === "new") {
-    if (await stashIfNeeded(d, state.app, state.level)) toast("Brouillon mis de côté dans « Mes enchaînements »"); else toast("Nouvel enchaînement");
-    delete state.drafts[draftKey()]; SAVED = null; loadSaved().then(() => !state.page || renderRoutine());
-  } else if (ds.act === "save") {
-    d.name = $("#rtName")?.value.trim() || d.name;
-    if (!d.name) { toast("Donne d'abord un nom à l'enchaînement"); $("#rtName")?.focus(); return; }
-    await saveDraft(d); await loadSaved();
+  } else if (ds.act === "create") { openCreate(); return; }
+  else if (ds.capp || ds.clvl) {
+    const dlg = $("#detail"); if (ds.capp) dlg._app = ds.capp; if (ds.clvl) dlg._lvl = ds.clvl;
+    dlg._name = $("#cName")?.value ?? ""; dlg._gym = $("#cGym")?.value ?? ""; openCreate(true); return;
+  } else if (ds.act === "docreate") {
+    const dlg = $("#detail"); if (!dlg._app || !dlg._lvl) { toast("Choisis l'agrès et le niveau"); return; }
+    const r = newRoutine(dlg._app, dlg._lvl, $("#cName").value.trim(), $("#cGym").value.trim());
+    dlg.close(); openRoutine(r); toast(`Créé : ${r.name}`);
   } else if (ds.page) {
-    state.page = ds.page === "recap" ? "recap" : null;
-    history.replaceState(null, "", state.page ? "#mes" : location.pathname);
-    if (state.page) { SAVED = null; } else if (ds.page === "edit" && b.closest("#page-recap") && b.classList.contains("primary")) {
-      if (await stashIfNeeded(d, state.app, state.level)) toast("Brouillon précédent mis de côté");
-      delete state.drafts[draftKey()];
-    }
+    state.page = "home"; history.replaceState(null, "", location.pathname); SAVED = null;
     window.scrollTo({ top: 0 });
   } else if (ds.act === "share" || ds.rshare) {
     const r = ds.rshare ? (SAVED || []).find((x) => x.id === ds.rshare) : payload(d);
@@ -845,20 +888,14 @@ document.addEventListener("click", async (e) => {
   else if (ds.act === "doimport") {
     const r = await previewImport(); if (!r) { toast("Code non reconnu"); return; }
     const { lost, ...rr } = r; rr.updated = new Date().toISOString(); rr.name = rr.name || "Enchaînement reçu";
-    Routines.put(rr); $("#detail").close(); history.replaceState(null, "", location.pathname + (state.page ? "#mes" : ""));
+    Routines.put(rr); $("#detail").close(); history.replaceState(null, "", location.pathname);
     SAVED = null; toast(`Importé : ${rr.name}`);
   } else if (ds.act === "export") { exportAll(); toast("Fichier de sauvegarde téléchargé"); return; }
   else if ("rapp" in ds) (state.rf ||= {}).app = ds.rapp;
   else if ("rlvl" in ds) (state.rf ||= {}).level = ds.rlvl;
   else if (ds.ropen) {
     const r = (SAVED || []).find((x) => x.id === ds.ropen); if (!r) return;
-    const key = `${r.app}:${r.level}`, cur = state.drafts[key];
-    if (cur && cur.id !== r.id && await stashIfNeeded(cur, r.app, r.level)) toast("Brouillon précédent mis de côté");
-    state.level = r.level; state.app = r.app;
-    state.drafts[key] = { manual: {}, ded: {}, jumps: [{ id: "", ded: 0 }, { id: "", ded: 0 }], svalos: {}, items: [], ...structuredClone(r), saved: r.updated || new Date().toISOString() };
-    state.drafts[key]._last = JSON.stringify(payload(state.drafts[key]));
-    state.page = null; history.replaceState(null, "", location.pathname);
-    toast(`Ouvert : ${r.name || "sans nom"}`);
+    openRoutine(r); return;
   } else if (ds.rdup) {
     const r = (SAVED || []).find((x) => x.id === ds.rdup); if (!r) return;
     Routines.put({ ...structuredClone(r), id: uid(), saved: undefined, name: `${r.name || "Sans nom"} (copie)`, updated: new Date().toISOString() });
@@ -866,7 +903,7 @@ document.addEventListener("click", async (e) => {
   } else if (ds.rdel) {
     if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Confirmer la suppression"; return; }
     Routines.del(ds.rdel);
-    for (const dr of Object.values(state.drafts)) if (dr.id === ds.rdel) { delete dr.saved; delete dr._last; dr.id = uid(); }
+    for (const [k, dr] of Object.entries(state.drafts)) if (dr.id === ds.rdel) delete state.drafts[k];
     toast("Supprimé"); SAVED = null;
   } else return;
   render();
@@ -895,12 +932,16 @@ $("#detail")?.addEventListener("close", () => { state.detail = null; state.detai
 document.addEventListener("input", (e) => {
   const t = e.target, d = draft();
   if (t.id === "q") { state.q = t.value; const pos = t.selectionStart; renderCatalogue(); const q = $("#q"); q.focus(); q.setSelectionRange(pos, pos); persist(); }
-  else if (t.id === "rtName" || t.id === "rtGym") { d[t.id === "rtName" ? "name" : "gym"] = t.value; persist(); autosave(); }
+  else if (t.id === "rtName" || t.id === "rtGym") { d[t.id === "rtName" ? "name" : "gym"] = t.value; persist(); autosave(); if (t.id === "rtName" && $(".ctx-name")) $(".ctx-name").textContent = t.value || "Sans nom"; }
   else if (t.id === "impCode") previewImport();
   else if (t.id === "rq") { (state.rf ||= {}).q = t.value; const pos = t.selectionStart; renderRecap().then(() => { const q = $("#rq"); q.focus(); q.setSelectionRange(pos, pos); }); persist(); }
 });
 document.addEventListener("change", async (e) => {
   const t = e.target, d = draft();
+  if (t.id === "ctxLevel") { // une gymnaste change de niveau : l'enchaînement suit
+    const old = draftKey(); state.level = t.value; d.level = t.value;
+    delete state.drafts[old]; state.drafts[draftKey()] = d; render(); toast(`Niveau ${t.value} : note recalculée`); return;
+  }
   if (t.id === "impFile" && t.files[0]) {
     try { const n = await importFile(t.files[0]); toast(`${n} enchaînement(s) restauré(s)`); } catch (err) { toast("Échec : " + err.message); }
     SAVED = null; t.value = ""; render(); return;
@@ -916,17 +957,18 @@ fetch("elements.json").then((r) => r.json()).then((data) => {
   ELS = data; BY_ID = Object.fromEntries(data.map((e) => [e.id, e]));
   state.media = Media.all();
   for (const [k, dr] of Object.entries(state.drafts)) dr.items = (dr.items || []).filter((it) => BY_ID[it.id]);
-  state.page = location.hash === "#mes" ? "recap" : null;
+  migrateDrafts();
+  state.page = location.hash === "#edit" && state.drafts[draftKey()]?.saved ? "edit" : "home";
   const hc = location.hash.match(/^#code=(PAL1-[A-Za-z0-9_-]+)/);
-  if (hc) { state.page = "recap"; setTimeout(() => openImport(hc[1]), 0); }
-  loadSaved().then(() => { if (!state.page && state.app !== "saut") renderRoutine(); });
+  if (hc) { state.page = "home"; setTimeout(() => openImport(hc[1]), 0); }
+  loadSaved().then(() => { if (state.page === "edit" && state.app !== "saut") renderRoutine(); });
   render();
 });
 window.ResizeObserver && new ResizeObserver(([e]) => document.documentElement.style.setProperty("--top", e.target.offsetHeight + "px")).observe($(".top"));
 document.addEventListener("toggle", (e) => { if (e.target.matches?.("details.filters")) { state.fOpen = e.target.open; persist(); } }, true);
 window.addEventListener("hashchange", () => {
   const hc = location.hash.match(/^#code=(PAL1-[A-Za-z0-9_-]+)/);
-  state.page = location.hash === "#mes" || hc ? "recap" : null; SAVED = null; render();
+  state.page = location.hash === "#edit" && !hc && state.drafts[draftKey()] ? "edit" : "home"; SAVED = null; render();
   if (hc) openImport(hc[1]);
 });
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
