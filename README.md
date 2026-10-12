@@ -40,6 +40,13 @@ hébergeable n'importe où (GitHub Pages, Netlify…) ; `server.py` sert juste �
 node tools/test_eval.js                                   # contrôle des exemples
 ```
 
+## Publier une nouvelle version
+
+```
+sh tools/bump.sh   # numérote les fichiers (index.html) et le cache hors-ligne (sw.js)
+git commit -am "…" && git push   # GitHub Pages republie en ~1 min
+```
+
 ## Limites connues
 
 - Certaines valorisations demandent un jugement (balancés, « mvt en 2 parties »…) : elles sont à cocher à la main.

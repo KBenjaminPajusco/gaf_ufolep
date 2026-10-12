@@ -409,8 +409,8 @@ function renderDetail() {
   const ev = m ? embedUrl(m.url) : null;
   const statusTxt = st.val ? "Valorisable en " + state.level : st.aut ? "Autorisé en " + state.level + " (ne rapporte pas de valorisation)" : "Hors niveau en " + state.level;
   dlg.innerHTML = `<form method="dialog" class="dlg">
-    ${state.fromReq ? `<button type="button" class="linkbtn" data-req="${state.fromReq}">← Retour au barème</button>` : ""}
     <header><div>${palBadge(e, st)} <span class="muted">${esc(e.arche)}${e.side ? " · " + esc(e.side) : ""} · n° ${esc(e.num)}</span></div><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
+    ${state.fromReq ? `<button type="button" class="linkbtn" data-req="${state.fromReq}">← Retour au barème</button>` : ""}
     <h3>${esc(e.name)}</h3>
     ${e.img ? `<img class="big" src="img/${e.id}.webp" alt="Pictogramme de la brochure : ${esc(e.name)}">` : ""}
     <div class="chips"><span class="chip ${st.val ? "okc" : ""}">${statusTxt}</span>${e.new ? `<span class="chip new">nouveau</span>` : ""}${e.maj ? `<span class="chip">modifié 2026</span>` : ""}${Object.entries(FLAG_LABEL).filter(([k]) => e[k]).map(([, l]) => `<span class="chip">${l}</span>`).join("")}<span class="chip">brochure p. ${e.page}</span></div>

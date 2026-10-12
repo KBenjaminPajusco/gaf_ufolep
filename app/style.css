@@ -584,3 +584,12 @@ body.on-recap .nav-btn.back, body.on-recap .ctxbar { display: none; }
 .sg-el small { display: block; color: var(--muted); font-size: 12px; }
 .sg-add { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--app); color: #fff; font-size: 20px; line-height: 1; }
 
+
+/* fenêtres : en-tête (et croix) toujours visible quand on fait défiler */
+dialog#detail { overflow-y: auto; overscroll-behavior: contain; }
+.dlg > header {
+  position: sticky; top: -16px; z-index: 5; margin: -16px -16px 0; padding: 12px 16px 10px;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.dlg > header .mini.icon { width: 36px; height: 36px; font-size: 20px; border-radius: 50%; }
+
