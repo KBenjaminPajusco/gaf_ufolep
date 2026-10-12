@@ -1,5 +1,5 @@
 // Cache hors-ligne : fichiers de l'appli en "réseau d'abord", l'API n'est jamais mise en cache.
-const CACHE = "palier-v9";
+const CACHE = "palier-v10";
 const FILES = ["./", "index.html", "style.css", "rules.js", "app.js", "vendor/Sortable.min.js", "elements.json", "icon.svg", "manifest.webmanifest"];
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())));
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));

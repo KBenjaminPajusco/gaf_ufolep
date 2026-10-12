@@ -102,8 +102,22 @@ function buildCtx(d, level, app) {
   const gymLG = (it) => it.kind === "saut" || it.kind === "pivot";
   const H = {
     items, counted,
-    arches: (n) => { const a = new Set(counted.map((it) => it.arche)); return [`${n} arches`, a.size >= n, `${a.size} arche${a.size > 1 ? "s" : ""} : ${[...a].join(", ") || "aucune"}`]; },
-    count: (a, b) => { const c = new Set(counted.map((it) => it.id)).size; return [`${a} à ${b} éléments`, c >= a && c <= b, `${c} élément${c > 1 ? "s" : ""} reconnu${c > 1 ? "s" : ""}`]; },
+    // constats pour le tronc commun : { ok, items (mouvements qui valident), k (quantité demandée) }
+    need: (pred, k = 1) => { const m = counted.filter(pred); return { ok: m.length >= k, items: m, k }; },
+    either: (...cs) => cs.find((c) => c.ok) || { ok: false, items: cs.flatMap((c) => c.items || []), k: 1 },
+    bothBarsC: () => { const bi = counted.find((it) => it.bar === "BI"), bs = counted.find((it) => it.bar === "BS"); return { ok: !!(bi && bs), items: [bi, bs].filter(Boolean), why: `BI : ${bi ? short(bi) : "aucun"} · BS : ${bs ? short(bs) : "aucun"}` }; },
+    barChangeC: (a, b) => { const k = items.findIndex((it, k) => k > 0 && (a ? items[k - 1].bar === a && it.bar === b : items[k - 1].bar !== it.bar)); return k > 0 ? { ok: true, items: [items[k - 1], items[k]], why: `${short(items[k - 1])} (${items[k - 1].bar}) → ${short(items[k])} (${items[k].bar})` } : { ok: false, items: [] }; },
+    pgC: () => { const g = H.pg()[0]; return { ok: !!g, items: g || [], why: g ? "PG : " + g.map(short).join(" + ") : "" }; },
+    laC: (k) => {
+      const seen = new Map(); for (const s of H.las()) { const key = s.map((it) => it.id).join(">"); if (!seen.has(key)) seen.set(key, s); }
+      const l = [...seen.values()];
+      return { ok: l.length >= k, items: l.flat(), why: l.length ? `${Math.min(l.length, k)}/${k} : ` + l.map((s) => s.map(short).join(" + ")).join(" · ") : `0/${k}` };
+    },
+    arches: (n) => {
+      const by = new Map(); for (const it of counted) { if (!by.has(it.arche)) by.set(it.arche, []); if (!by.get(it.arche).includes(short(it))) by.get(it.arche).push(short(it)); }
+      return [`${n} arches`, { ok: by.size >= n, why: `${Math.min(by.size, n)}/${n} : ` + ([...by].map(([a, l]) => `${a} (${l.join(", ")})`).join(" · ") || "aucune") }];
+    },
+    count: (a, b) => { const c = new Set(counted.map((it) => it.id)).size; return [`${a} à ${b} éléments`, { ok: c >= a && c <= b, why: `${c} élément${c > 1 ? "s" : ""} reconnu${c > 1 ? "s" : ""}${c > b ? ` (${c - b} de trop)` : ""}` }]; },
     has: (pred) => counted.some(pred),
     n: (pred) => counted.filter(pred).length,
     bothBars: () => counted.some((it) => it.bar === "BI") && counted.some((it) => it.bar === "BS"),
@@ -161,13 +175,23 @@ function buildCtx(d, level, app) {
   return H;
 }
 
+// nom court d'un mouvement (partie principale) pour les explications
+const short = (it) => { const n = it.name.split(/\. |\(/)[0].trim(); return n.length > 42 ? n.slice(0, 40) + "…" : n; };
+function describe(c) {
+  if (c.why) return c.why;
+  const names = [...new Set((c.items || []).map(short))];
+  if ((c.k || 1) > 1) return `${Math.min(names.length, c.k)}/${c.k}` + (names.length ? " : " + names.join(", ") : "");
+  return names.length ? "Validé par : " + names.join(", ") : "Aucun mouvement ne remplit cette exigence";
+}
+
 // ---------- évaluation complète ----------
 function evaluate(d, level = state.level, app = state.app) {
   const H = buildCtx(d, level, app);
   const man = d.manual || {};
   const tcSpec = TC[app][level](H);
-  const tc = tcSpec.map(([t, ok, why], k) => {
+  const tc = tcSpec.map(([t, c, w], k) => {
     const m = man["tc" + k];
+    const ok = typeof c === "object" ? c.ok : !!c, why = typeof c === "object" ? describe(c) : w;
     return { t, auto: ok, why, ok: m === "ok" ? true : m === "ko" ? false : !!ok, forced: m };
   });
   const vSpec = VALOS[app][level];
@@ -476,7 +500,7 @@ function reqRow(kind, k, r, extra) {
 
 function renderNote() {
   const d = draft(), ev = evaluate(d), H = ev.H;
-  const names = (w) => (w || []).map((i) => H.items[i]?.name).filter(Boolean).join(" + ");
+  const names = (w) => (w || []).map((i) => H.items[i] && short(H.items[i])).filter(Boolean).join(" + ");
   const lvlKey = state.level[0];
   let html = `<header><h2 id="h-note">Note de départ</h2></header><div class="stack">
   <div class="total pin">
@@ -492,7 +516,7 @@ function renderNote() {
       let why = "";
       if (v.kept && v.use?.length) why = "Validée par : " + names(v.use);
       else if (v.kept) why = v.forced ? "Validée à la main" : "";
-      else if (v.ok) why = ev.vals.length > 4 ? "Possible, mais pas retenue (les 4 meilleures comptent, ou éléments déjà utilisés)" : "Éléments déjà utilisés par une autre valorisation";
+      else if (v.ok) why = (v.wit[0]?.length ? `Possible avec : ${names(v.wit[0])} · ` : "") + (ev.vals.length > 4 ? "pas retenue (les 4 meilleures comptent, ou éléments déjà utilisés)" : "éléments déjà utilisés par une autre valorisation");
       else if (v.manual && !v.forced) why = "Demande un jugement : coche-la si elle est réalisée";
       return reqRow("v", k, { ...v, ok: v.kept }, { why, pts: v.kept ? "+" + v.pts : v.pts, kept: v.kept });
     }).join("")}
