@@ -5,7 +5,7 @@ for (const app of ["sol", "poutre", "barres"]) {
   const items = ex.items.map(([re, pal, o]) => ({ id: find(re, pal), link: "none", bar: "BI", mousse: false, ...o }));
   const missing = items.filter((x) => !x.id).length;
   const ev = evaluate({ items: items.filter((x) => x.id), manual: {}, ded: {} }, ex.level, app);
-  console.log(ex.label, "manquants:", missing, "ND", ev.nd + "/" + ev.ndMax, "fautes", ev.ded, ev.tc.filter((t) => !t.ok).map((t) => t.t));
+  console.log(ex.label, "manquants:", missing, "ND", ev.nd + "/" + ev.ndMax, ev.tc.filter((t) => !t.ok).map((t) => t.t));
 }
 // sanity: every level/app has rules that run on an empty routine
 for (const app of ["sol", "poutre", "barres"]) for (const l of LEVELS) { const ev = evaluate({ items: [], manual: {}, ded: {} }, l, app); if (ev.ndMax < 13) console.log("max bizarre", app, l, ev.ndMax); }

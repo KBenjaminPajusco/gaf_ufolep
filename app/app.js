@@ -196,30 +196,19 @@ function evaluate(d, level = state.level, app = state.app) {
   vals.forEach((v, k) => { v.kept = k in best.pick; v.use = best.pick[k]; v.ok = v.wit.length > 0; });
   const vMax = [...vals].map((v) => v.pts).sort((a, b) => b - a).slice(0, K).reduce((a, b) => a + b, 0);
 
-  // fautes automatiques (tableau des fautes p. 15-17)
-  const auto = [], warns = [];
+  // l'appli calcule la note de départ ; seuls les éléments non reconnus sont signalés
+  const warns = [];
   H.items.forEach((it) => { if (!it.aut) warns.push(`« ${it.name} » (${it.palier}) est hors des paliers autorisés en ${level} : non reconnu.`); });
-  const last = H.items.at(-1);
-  if (app === "sol" && last && last.kind !== "acro") auto.push(["Dernier élément de l'enchaînement non acrobatique", 0.3]);
-  if (app === "barres") H.items.forEach((it, k) => {
-    const pv = H.items[k - 1]; if (!pv) return;
-    for (const re of [/élan circulaire/i, /tour d'appui.*arri/i]) if (re.test(pv.name) && re.test(it.name)) auto.push([`Répétition pour l'élément suivant : « ${it.name} »`, 0.5]);
-  });
-  if ((app === "poutre" || (app === "barres" && !["A1", "A2", "B1"].includes(level))) && last && !last.aut)
-    auto.push(["Sortie pas dans le palier autorisé", 0.5]);
-  const dd = d.ded || {};
-  const manualDed = (dd.p || 0) * 0.1 + (dd.m || 0) * 0.3 + (dd.g || 0) * 0.5 + (dd.c || 0) * 1;
   const tcPts = tc.filter((x) => x.ok).length;
   const nd = tcPts + best.pts;
-  const ded = auto.reduce((a, [, x]) => a + x, 0) + manualDed;
-  return { H, tc, vals, tcPts, vPts: best.pts, vMax, K, nd, ndMax: tc.length + vMax, auto, warns, ded, final: Math.max(0, nd - ded) };
+  return { H, tc, vals, tcPts, vPts: best.pts, vMax, K, nd, ndMax: tc.length + vMax, warns, final: nd };
 }
 
 function evaluateSaut(d, level = state.level) {
   const notes = d.jumps.map((j) => {
     const el = BY_ID[j.id]; if (!el) return null;
     const st = status(el, level); const v = SAUT_VALEUR[el.palier] ?? 0;
-    return { el, st, v, note: st.aut ? Math.max(0, v - (Number(j.ded) || 0)) : 0 };
+    return { el, st, v, note: st.aut ? v : 0 };
   });
   const valid = notes.filter(Boolean);
   const best = valid.length ? Math.max(...valid.map((n) => n.note)) : 0;
@@ -489,12 +478,11 @@ function renderNote() {
   const d = draft(), ev = evaluate(d), H = ev.H;
   const names = (w) => (w || []).map((i) => H.items[i]?.name).filter(Boolean).join(" + ");
   const lvlKey = state.level[0];
-  let html = `<header><h2 id="h-note">Note estimée</h2></header><div class="stack">
-  <div class="total total4 pin">
+  let html = `<header><h2 id="h-note">Note de départ</h2></header><div class="stack">
+  <div class="total pin">
     <div><span title="Tronc commun">T. commun</span><b>${ev.tcPts}<small class="muted">/${ev.tc.length}</small></b></div>
-    <div><span>Valoris.</span><b>${ev.vPts}<small class="muted">/${ev.vMax}</small></b></div>
-    <div><span>Départ</span><b>${fmt(ev.nd)}<small class="muted">/${ev.ndMax}</small></b></div>
-    <div class="final"><span>Estimée</span><b>${fmt(ev.final)}</b>${ev.ded ? `<small>−${fmt(ev.ded)} fautes</small>` : ""}</div>
+    <div><span>Valorisations</span><b>${ev.vPts}<small class="muted">/${ev.vMax}</small></b></div>
+    <div class="final"><span>Note de départ</span><b>${fmt(ev.nd)}<small>/${ev.ndMax}</small></b></div>
   </div>
   <div class="card req-group"><h3>Tronc commun <span class="pts muted">1 pt par exigence</span></h3>
     ${ev.tc.map((r, k) => reqRow("tc", k, r, { why: r.why || (r.forced ? "réglé à la main" : ""), pts: r.ok ? "+1" : "0" })).join("")}
@@ -510,12 +498,6 @@ function renderNote() {
     }).join("")}
     <p class="note-foot">Une valorisation ne peut pas contenir d'élément nomade et doit utiliser des éléments distincts des autres valorisations${state.app === "sol" ? " (sauf « 2 acros de sens différents »)" : ""}. Elle est validée même avec une chute.</p>
   </div>
-  <div class="card req-group"><h3>Fautes <span class="pts muted">−${fmt(ev.ded)}</span></h3>
-    ${ev.auto.map(([t, x]) => `<div class="ded-row"><span>${esc(t)}</span><b>−${fmt(x)}</b></div>`).join("")}
-    ${[["p", "Petites fautes", "0,1"], ["m", "Moyennes fautes", "0,3"], ["g", "Grosses fautes", "0,5"], ["c", "Chutes", "1"]].map(([k, l, v]) => `
-      <div class="ded-row"><span>${l} <span class="muted">(−${v})</span></span>
-      <span class="stepper"><button type="button" data-ded="${k}:-1" aria-label="Moins">−</button><output>${d.ded?.[k] || 0}</output><button type="button" data-ded="${k}:1" aria-label="Plus">+</button></span></div>`).join("")}
-  </div>
   <div class="card info"><h3 style="font-size:18px;text-transform:uppercase;margin-bottom:8px">Rappels ${esc(APPS.find((a) => a.id === state.app).label)} ${state.level}</h3><dl>
     <dt>Paliers autorisés</dt><dd>${PALIERS[state.level].aut.join(", ")}</dd>
     <dt>Valorisables</dt><dd>${PALIERS[state.level].val.join(", ")}</dd>
@@ -525,10 +507,10 @@ function renderNote() {
     <dt>LA / LAE</dt><dd>éléments acrobatiques liés directement, sans pas ni sursaut ; LAE = tous avec envol, salti appel 2 pieds</dd>
     ${state.app !== "barres" ? `<dt>LG / LM</dt><dd>LG : 2 éléments gymniques différents (sauts, pivots) ; LM (poutre) : 1 gymnique + 1 acro. Tous dans les paliers valorisables.</dd>` : ""}
   </dl></div>
-  <p class="note-foot">Estimation non officielle d'après le Programme Technique GAF UFOLEP du 29/09/2026. Le bonus prévu par le programme n'est pas encore détaillé dans la brochure et n'est pas compté. Le jury reste seul juge.</p>
+  <p class="note-foot">Note de départ calculée d'après le Programme Technique GAF UFOLEP du 29/09/2026 (outil non officiel). Le bonus prévu par le programme n'est pas encore détaillé dans la brochure et n'est pas compté. Le jury reste seul juge.</p>
   </div>`;
   $("#pane-note").innerHTML = html;
-  $("#scorePill").innerHTML = `${fmt(ev.final)} <small>/ ${ev.ndMax}</small>`;
+  $("#scorePill").innerHTML = `${fmt(ev.nd)} <small>/ ${ev.ndMax}</small>`;
 }
 
 function renderSaut() {
@@ -540,9 +522,7 @@ function renderSaut() {
   d.jumps.forEach((j, k) => {
     const n = ev.notes[k];
     html += `<div class="card jump"><label for="j${k}">Saut ${k + 1}</label><select id="j${k}" data-jump="${k}">${opts(j.id)}</select>
-      <div class="row"><div class="muted">${n ? `Valeur ${n.v}${n.st.val ? " · valorisable ★" : ""}` : "Choisis un saut autorisé (★ = valorisable)"}</div>
-      <div><label for="jd${k}">Fautes</label><input id="jd${k}" type="number" inputmode="decimal" min="0" step="0.1" value="${j.ded || 0}" data-jded="${k}"></div></div>
-      ${n ? `<div><b style="font:700 24px var(--f-display)">${fmt(n.note)}</b> <span class="muted">= ${n.v} − ${fmt(Number(j.ded) || 0)}</span></div>` : ""}</div>`;
+      <div class="muted">${n ? `Valeur <b style="font:700 22px var(--f-display);color:var(--ink)">${n.v}</b>${n.st.val ? " · valorisable ★" : ""}` : "Choisis un saut autorisé (★ = valorisable)"}</div></div>`;
   });
   html += `<div class="card"><h3 style="font-size:18px;text-transform:uppercase;margin-bottom:6px">Valeur des sauts</h3><div class="table-wrap"><table class="val-table"><tr><th>PR1</th><th>PR2</th><th>PR3</th><th>P1–P2</th><th>P3–P5</th><th>P6–P7</th><th>Nomades</th></tr><tr><td>9</td><td>10</td><td>11</td><td>12</td><td>13</td><td>14</td><td>12</td></tr></table></div>
   <p class="note-foot">Pile de tapis (PR1 à PR3) : filière jeunes uniquement. À partir de 13 ans, trampo-tremp autorisé avec −1 pt ; mini-trampoline autorisé en 2026-2027 avec −1 pt.</p></div></div>`;
@@ -550,13 +530,13 @@ function renderSaut() {
   $("#tabCount").textContent = d.jumps.filter((j) => j.id).length || "";
 
   const valos = SAUT_VALOS[state.level] || [];
-  let note = `<header><h2 id="h-note">Note estimée</h2></header><div class="stack">
-  <div class="total pin"><div><span>Meilleur saut</span><b>${fmt(ev.best)}</b></div><div><span>Valorisations</span><b>+${fmt(ev.vPts)}</b></div><div class="final"><span>Note estimée</span><b>${fmt(ev.final)}</b></div></div>
+  let note = `<header><h2 id="h-note">Note de départ</h2></header><div class="stack">
+  <div class="total pin"><div><span>Meilleur saut</span><b>${fmt(ev.best)}</b></div><div><span>Valorisations</span><b>+${fmt(ev.vPts)}</b></div><div class="final"><span>Note de départ</span><b>${fmt(ev.final)}</b></div></div>
   <div class="card req-group"><h3>Valorisations ${state.level}</h3>
   ${valos.map((t, k) => { const s = d.svalos[k] || {}; return `<div class="req ${s.on ? "ok" : "man"}"><button class="st" type="button" data-sval="${k}" aria-label="${esc(t)}">${s.on ? "✓" : "?"}</button><div>${esc(t)}</div>
     <input type="number" min="0" step="0.5" value="${s.pts ?? ""}" placeholder="pts" data-svpts="${k}" aria-label="Points" style="width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg)"></div>`; }).join("")}
-  <p class="note-foot">La brochure ne chiffre pas les valorisations au saut : saisis les points annoncés par ton comité. Méthode officielle : noter chaque saut, appliquer les fautes, garder la meilleure note PUIS ajouter la valorisation.</p></div>
-  <p class="note-foot">Estimation non officielle d'après le Programme Technique GAF UFOLEP du 29/09/2026.</p></div>`;
+  <p class="note-foot">La brochure ne chiffre pas les valorisations au saut : saisis les points annoncés par ton comité. Le meilleur des deux sauts compte, puis on ajoute la valorisation.</p></div>
+  <p class="note-foot">Note de départ calculée d'après le Programme Technique GAF UFOLEP du 29/09/2026 (outil non officiel).</p></div>`;
   $("#pane-note").innerHTML = note;
   $("#scorePill").innerHTML = `${fmt(ev.final)} <small>saut</small>`;
 }
@@ -590,7 +570,6 @@ async function encodeRoutine(r) {
     a: r.app, l: r.level, n: r.name || "", g: r.gym || "",
     i: (r.items || []).map((it) => [it.id, it.link === "direct" ? 1 : it.link === "indirect" ? 2 : 0, it.bar === "BS" ? 1 : 0, it.mousse ? 1 : 0]),
     m: r.manual && Object.keys(r.manual).length ? r.manual : undefined,
-    d: r.ded && Object.values(r.ded).some(Boolean) ? r.ded : undefined,
     j: r.app === "saut" ? r.jumps : undefined, s: r.app === "saut" ? r.svalos : undefined,
   };
   const raw = new TextEncoder().encode(JSON.stringify(compact));
@@ -645,7 +624,7 @@ async function previewImport() {
   try {
     const r = await decodeRoutine($("#impCode").value);
     const s = summary(r);
-    box.innerHTML = `<div class="imp-ok"><span class="lv" style="background:var(--${r.level})">${r.level}</span> <b>${esc(APPS.find((a) => a.id === r.app).label)} · ${esc(r.name || "Sans nom")}</b>${r.gym ? ` · ${esc(r.gym)}` : ""}<br><span class="muted">${r.app === "saut" ? "" : `${r.items.length} mouvements · `}note estimée ${s.main}${r.lost ? ` · ${r.lost} mouvement(s) inconnu(s) ignoré(s)` : ""}</span></div>`;
+    box.innerHTML = `<div class="imp-ok"><span class="lv" style="background:var(--${r.level})">${r.level}</span> <b>${esc(APPS.find((a) => a.id === r.app).label)} · ${esc(r.name || "Sans nom")}</b>${r.gym ? ` · ${esc(r.gym)}` : ""}<br><span class="muted">${r.app === "saut" ? "" : `${r.items.length} mouvements · `}note de départ ${s.main}${r.lost ? ` · ${r.lost} mouvement(s) inconnu(s) ignoré(s)` : ""}</span></div>`;
     return r;
   } catch (err) { box.innerHTML = $("#impCode").value.trim() ? `<p class="imp-err">${esc(err.message)}</p>` : ""; return null; }
 }
@@ -747,7 +726,7 @@ function migrateDrafts() {
 function summary(r) {
   if (r.app === "saut") { const ev = evaluateSaut(r, r.level); return { main: fmt(ev.final), sub: "meilleur saut + valorisations", tc: "" }; }
   const ev = evaluate(r, r.level, r.app);
-  return { main: fmt(ev.final), nd: `${fmt(ev.nd)}/${ev.ndMax}`, tc: `TC ${ev.tcPts}/${ev.tc.length}`, v: `valorisations ${ev.vPts}/${ev.vMax}`, warn: ev.warns.length };
+  return { main: `${fmt(ev.nd)}<small>/${ev.ndMax}</small>`, nd: `${fmt(ev.nd)}/${ev.ndMax}`, tc: `TC ${ev.tcPts}/${ev.tc.length}`, v: `valorisations ${ev.vPts}/${ev.vMax}`, warn: ev.warns.length };
 }
 async function renderRecap() {
   const box = $("#page-recap");
@@ -786,7 +765,7 @@ async function renderRecap() {
       html += `<li class="rcard" style="--c:${app.color}">
         <div class="rtop"><span class="lv" style="background:var(--${r.level})">${r.level}</span><span class="app">${app.label}</span><span class="muted when">modifié le ${date(r.updated)}</span></div>
         <button type="button" class="rname" data-ropen="${r.id}">${esc(r.name || "Sans nom")}</button>
-        <div class="rscore"><b>${s.main}</b><span>${s.nd ? `départ ${s.nd} · ${s.tc} · ${s.v}` : s.sub}</span></div>
+        <div class="rscore"><b>${s.main}</b><span>${s.nd ? `note de départ · ${s.tc} · ${s.v}` : s.sub}</span></div>
         <div class="rthumbs">${thumbs.map((id) => `<img src="img/${id}.webp" alt="" loading="lazy">`).join("")}${n > thumbs.length ? `<span class="more">${n} mvt${n > 1 ? "s" : ""}</span>` : ""}</div>
         ${s.warn ? `<div class="rwarn">${s.warn} élément${s.warn > 1 ? "s" : ""} hors niveau</div>` : ""}
         <div class="ractions"><button class="btn primary" type="button" data-ropen="${r.id}">Ouvrir</button><button class="btn" type="button" data-rshare="${r.id}">Partager</button><button class="btn" type="button" data-rdup="${r.id}">Dupliquer</button><button class="btn danger" type="button" data-rdel="${r.id}">Supprimer</button></div>
@@ -845,8 +824,7 @@ document.addEventListener("click", async (e) => {
     const cyc = [undefined, "ok", "ko"]; const cur = d.manual[ds.man];
     const nxt = cyc[(cyc.indexOf(cur) + 1) % 3];
     if (nxt) d.manual[ds.man] = nxt; else delete d.manual[ds.man];
-  } else if (ds.ded) { const [k, x] = ds.ded.split(":"); d.ded[k] = Math.max(0, (d.ded[k] || 0) + Number(x)); }
-  else if (ds.sval) { const s = (d.svalos[ds.sval] ||= {}); s.on = !s.on; }
+  } else if (ds.sval) { const s = (d.svalos[ds.sval] ||= {}); s.on = !s.on; }
   else if (ds.act === "example") {
     const ex = EXAMPLES[state.app]; state.level = ex.level;
     const find = (re, pal) => ELS.find((x) => x.app === state.app && re.test(x.name) && (!pal || x.palier === pal))?.id;
@@ -933,7 +911,6 @@ document.addEventListener("change", async (e) => {
   }
 
   if (t.dataset.jump) d.jumps[t.dataset.jump].id = t.value;
-  else if (t.dataset.jded) d.jumps[t.dataset.jded].ded = Number(t.value) || 0;
   else if (t.dataset.svpts) (d.svalos[t.dataset.svpts] ||= {}).pts = t.value;
   else return;
   render();
