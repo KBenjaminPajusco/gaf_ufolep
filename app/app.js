@@ -231,6 +231,7 @@ function evaluateSaut(d, level = state.level) {
 function render() {
   const home = state.page !== "edit";
   document.body.classList.toggle("on-recap", home);
+  document.body.classList.toggle("picking", !home && state.view === "catalogue" && state.app !== "saut");
   $("#page-recap").hidden = !home;
   if (home) { $("#ctxbar").innerHTML = ""; renderRecap(); persist(); return; }
   const lvlColor = `var(--${state.level})`;
@@ -290,7 +291,7 @@ function renderCatalogue() {
   const inRoutine = {};
   if (!isSaut) for (const it of draft().items) inRoutine[it.id] = (inRoutine[it.id] || 0) + 1;
 
-  let html = `${isSaut ? "" : `<div class="pick-bar"><button type="button" class="btn" data-view="routine">← Enchaînement</button><span>Choisis un élément à ajouter</span></div>`}
+  let html = `${isSaut ? "" : `<div class="pick-bar"><button type="button" class="back-arrow" data-view="routine" aria-label="Retour à l'enchaînement">←</button><span>Ajouter un élément</span></div>`}
   <header><h2 id="h-cat">Mouvements</h2><span class="muted">${state.level} · autorisés ${pal.aut[0] ?? "PR"}–${pal.aut.at(-1) ?? ""} · valorisables ${pal.val[0]}–${pal.val.at(-1)}</span>
     <div class="seg viewseg" role="group" aria-label="Affichage">${[["arche", "Arche"], ["liste", "Liste"]].map(([k, l]) => `<button type="button" data-catview="${k}" aria-pressed="${curView === k}">${l}</button>`).join("")}</div></header>
   <div class="arches" role="group" aria-label="Arche">

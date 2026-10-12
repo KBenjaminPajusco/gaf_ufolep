@@ -532,3 +532,14 @@ body.on-recap .nav-btn.back, body.on-recap .ctxbar { display: none; }
   .brand .score-pill { order: 4; margin-left: auto; }
 }
 
+
+/* téléphone, choix d un élément : pas d en-tête ni d onglets, juste la flèche retour */
+@media (max-width: 899px) {
+  body.picking .top, body.picking .tabbar { display: none; }
+  body.picking { padding-bottom: 0; }
+  body.picking .pick-bar { top: 0; padding-top: calc(8px + env(safe-area-inset-top, 0px)); }
+  .pick-bar span { font: 700 20px/1 var(--f-display); text-transform: uppercase; letter-spacing: .03em; }
+  .back-arrow { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); font-size: 22px; line-height: 1; display: grid; place-items: center; }
+}
+
+@media (max-width: 899px) { body.picking #h-cat { display: none; } }
