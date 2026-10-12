@@ -112,7 +112,7 @@ h1, h2, h3 { font-family: var(--f-display); font-weight: 700; letter-spacing: .0
 
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(2, 1fr);
   background: var(--surface); border-top: 1px solid var(--line);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -503,4 +503,32 @@ body.on-recap .nav-btn.back, body.on-recap .ctxbar { display: none; }
 .ltile[aria-pressed="true"] { background: var(--c); border-color: var(--c); color: #fff; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 480px) { .ctiles { grid-template-columns: repeat(2, 1fr); } .ltiles { grid-template-columns: repeat(4, 1fr); } }
+
+
+/* ---------- téléphone : ajout guidé ---------- */
+.add-fab, .pick-bar { display: none; }
+@media (max-width: 899px) {
+  #pane-routine { padding-bottom: 76px; }
+  .add-fab {
+    display: block; position: fixed; left: 16px; right: 16px; z-index: 25;
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px)); padding: 15px; border: 0; border-radius: 14px;
+    background: var(--app); color: #fff; font: 700 19px/1 var(--f-display); text-transform: uppercase; letter-spacing: .04em;
+    box-shadow: 0 8px 20px -6px rgb(0 0 0 / .35);
+  }
+  .pick-bar {
+    display: flex; align-items: center; gap: 10px; position: sticky; top: var(--top, 60px); z-index: 15;
+    margin: -14px -16px 12px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
+    font-weight: 600; font-size: 14px;
+  }
+  .pick-bar .btn { padding: 7px 12px; }
+  #pane-catalogue .hint-drag { display: none; }
+}
+
+
+@media (max-width: 899px) {
+  .rt-head [data-act="create"], #pane-routine [data-page="home"].wide { display: none; }
+  .brand .nav-btn.back { order: 2; margin-left: auto; padding: 6px 11px; font-size: 13px; }
+  .brand .ctxbar { order: 3; flex: 1 1 60%; }
+  .brand .score-pill { order: 4; margin-left: auto; }
+}
 

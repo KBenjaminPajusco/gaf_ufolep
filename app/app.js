@@ -35,6 +35,7 @@ function dragOn() { document.body.classList.add("dragging"); window.getSelection
 function dragOff() { document.body.classList.remove("dragging"); window.getSelection()?.removeAllRanges(); }
 
 let ELS = [], BY_ID = {};
+const isMobile = () => window.matchMedia?.("(max-width: 899px)").matches;
 const isMousse = (id) => BY_ID[id]?.arche === "Acro poutre mousse"; // ces éléments se font sur la poutre mousse
 const LS_KEY = "palier-v1";
 const state = load() || { level: "B1", app: "sol", view: "catalogue", filter: "aut", q: "", drafts: {} };
@@ -271,7 +272,8 @@ function catalogueList(arche = F().arche) {
 const PAGE = { w: 1190.55, h: 841.89 };
 function renderCatalogue() {
   const f = F(), isSaut = state.app === "saut";
-  const arcView = (state.catView || "arche") === "arche";
+  const curView = state.catView || (isMobile() ? "liste" : "arche");
+  const arcView = curView === "arche";
   const all = ELS.filter((e) => e.app === state.app);
   if (f.arche && !all.some((e) => e.arche === f.arche)) f.arche = "";
   const arches = [...new Set(all.map((e) => e.arche))];
@@ -288,8 +290,9 @@ function renderCatalogue() {
   const inRoutine = {};
   if (!isSaut) for (const it of draft().items) inRoutine[it.id] = (inRoutine[it.id] || 0) + 1;
 
-  let html = `<header><h2 id="h-cat">Mouvements</h2><span class="muted">${state.level} · autorisés ${pal.aut[0] ?? "PR"}–${pal.aut.at(-1) ?? ""} · valorisables ${pal.val[0]}–${pal.val.at(-1)}</span>
-    <div class="seg viewseg" role="group" aria-label="Affichage">${[["arche", "Arche"], ["liste", "Liste"]].map(([k, l]) => `<button type="button" data-catview="${k}" aria-pressed="${(state.catView || "arche") === k}">${l}</button>`).join("")}</div></header>
+  let html = `${isSaut ? "" : `<div class="pick-bar"><button type="button" class="btn" data-view="routine">← Enchaînement</button><span>Choisis un élément à ajouter</span></div>`}
+  <header><h2 id="h-cat">Mouvements</h2><span class="muted">${state.level} · autorisés ${pal.aut[0] ?? "PR"}–${pal.aut.at(-1) ?? ""} · valorisables ${pal.val[0]}–${pal.val.at(-1)}</span>
+    <div class="seg viewseg" role="group" aria-label="Affichage">${[["arche", "Arche"], ["liste", "Liste"]].map(([k, l]) => `<button type="button" data-catview="${k}" aria-pressed="${curView === k}">${l}</button>`).join("")}</div></header>
   <div class="arches" role="group" aria-label="Arche">
     ${arcView ? "" : chip("data-arche-pick", "", !f.arche, "Toutes")}
     ${arches.map((a) => chip("data-arche-pick", a, shown === a, esc(a))).join("")}
@@ -326,7 +329,7 @@ function renderCatalogue() {
       }).join("")}
     </div></div>`;
     $("#pane-catalogue").innerHTML = html;
-    if (!isSaut && window.Sortable) Sortable.create($("#archeCanvas"), {
+    if (!isSaut && !isMobile() && window.Sortable) Sortable.create($("#archeCanvas"), {
       group: { name: "els", pull: "clone", put: false }, sort: false, draggable: ".hs", animation: 0, forceFallback: true, onStart: dragOn, onEnd: dragOff, fallbackTolerance: 5,
       delay: 200, delayOnTouchOnly: true, fallbackClass: "hs-drag",
     });
@@ -348,7 +351,7 @@ function renderCatalogue() {
   }
   html += `</ul>`;
   $("#pane-catalogue").innerHTML = html;
-  if (!isSaut && window.Sortable) Sortable.create($("#cards"), {
+  if (!isSaut && !isMobile() && window.Sortable) Sortable.create($("#cards"), {
     group: { name: "els", pull: "clone", put: false }, sort: false, animation: 120, forceFallback: true, onStart: dragOn, onEnd: dragOff, fallbackTolerance: 4,
     filter: ".add", preventOnFilter: false, delay: 180, delayOnTouchOnly: true,
   });
@@ -418,7 +421,7 @@ function renderRoutine() {
     <datalist id="gymList">${[...new Set((SAVED || []).map((r) => r.gym).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join("")}</datalist>
     <div id="saveState" class="save-state"></div>`;
   html += `<ol class="rt-list" id="rtList">`;
-  if (!d.items.length) html += `<li class="empty ph">Glisse des mouvements ici, ou touche + dans le catalogue.<br>Ils s'affichent dans l'ordre de passage ; glisse-les pour changer l'ordre.<br><br>${EXAMPLES[state.app].level === state.level ? `<button class="btn" type="button" data-act="example">Remplir avec l'exemple ${EXAMPLES[state.app].label}</button>` : ""}</li>`;
+  if (!d.items.length) html += `<li class="empty ph">${isMobile() ? "Touche <b>+ Ajouter un élément</b> pour choisir ton premier mouvement.<br>Ils s'affichent ici dans l'ordre de passage." : "Glisse des mouvements ici, ou touche + dans le catalogue.<br>Ils s'affichent dans l'ordre de passage ; glisse-les pour changer l'ordre."}<br><br>${EXAMPLES[state.app].level === state.level ? `<button class="btn" type="button" data-act="example">Remplir avec l'exemple ${EXAMPLES[state.app].label}</button>` : ""}</li>`;
   else {
     H.items.forEach((it, k) => {
       const st = { aut: it.aut, val: it.val };
@@ -437,7 +440,8 @@ function renderRoutine() {
         </div></li>`;
     });
   }
-  html += `</ol></div>`;
+  html += `</ol></div>
+  <button class="add-fab" type="button" data-view="catalogue">+ Ajouter un élément</button>`;
   if (ev.warns.length) html += `<ul class="warn-list">${ev.warns.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>`;
   html += `<button class="btn wide" type="button" data-page="home">← Tous mes enchaînements${SAVED?.length ? ` (${SAVED.length})` : ""} →</button></div>`;
   $("#pane-routine").innerHTML = html;
@@ -720,7 +724,7 @@ function openRoutine(r) {
   const d = { manual: {}, ded: { p: 0, m: 0, g: 0, c: 0 }, jumps: [{ id: "", ded: 0 }, { id: "", ded: 0 }], svalos: {}, items: [], ...structuredClone(r), saved: r.updated || new Date().toISOString() };
   d._last = JSON.stringify(payload(d));
   state.drafts[draftKey()] = d;
-  state.page = "edit"; state.view = "catalogue"; history.replaceState(null, "", location.pathname + "#edit");
+  state.page = "edit"; state.view = isMobile() ? "routine" : "catalogue"; history.replaceState(null, "", location.pathname + "#edit");
   render(); window.scrollTo({ top: 0 });
 }
 function openCreate(keep) {
@@ -839,6 +843,7 @@ document.addEventListener("click", async (e) => {
     d.items.push({ id: ds.add, link: "none", bar: prev?.bar || "BI" });
     if ($("#detail").open) $("#detail").close();
     toast(`Ajouté : ${BY_ID[ds.add].name.slice(0, 40)}`);
+    if (isMobile()) { state.view = "routine"; render(); requestAnimationFrame(() => $("#rtList .rt-item:last-child")?.scrollIntoView({ block: "center" })); return; }
   } else if (ds.link) {
     const it = d.items[ds.link], cur = BY_ID[it.id], pv = BY_ID[d.items[ds.link - 1].id];
     const cycle = state.app === "sol" && cur.kind === "saut" && pv.kind === "saut" ? ["none", "direct", "indirect"] : ["none", "direct"];
