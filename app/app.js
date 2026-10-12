@@ -291,8 +291,8 @@ function renderCatalogue() {
   let html = `<header><h2 id="h-cat">Mouvements</h2><span class="muted">${state.level} · autorisés ${pal.aut[0] ?? "PR"}–${pal.aut.at(-1) ?? ""} · valorisables ${pal.val[0]}–${pal.val.at(-1)}</span>
     <div class="seg viewseg" role="group" aria-label="Affichage">${[["arche", "Arche"], ["liste", "Liste"]].map(([k, l]) => `<button type="button" data-catview="${k}" aria-pressed="${(state.catView || "arche") === k}">${l}</button>`).join("")}</div></header>
   <div class="arches" role="group" aria-label="Arche">
-    ${arcView ? "" : chip("data-arche-pick", "", !f.arche, `Toutes <span>${all.length}</span>`)}
-    ${arches.map((a) => chip("data-arche-pick", a, shown === a, `${esc(a)} <span>${all.filter((e) => e.arche === a).length}</span>`)).join("")}
+    ${arcView ? "" : chip("data-arche-pick", "", !f.arche, "Toutes")}
+    ${arches.map((a) => chip("data-arche-pick", a, shown === a, esc(a))).join("")}
   </div>
   <div class="tools">
     <input class="search" id="q" type="search" placeholder="Chercher : salto, rondade, 154…" value="${esc(state.q)}" aria-label="Chercher un mouvement">
@@ -306,7 +306,7 @@ function renderCatalogue() {
     ${sides.length ? `<div class="frow"><span class="flabel">Sens</span>${sides.map((s) => chip("data-fside", s, f.side === s, esc(s))).join("")}</div>` : ""}
     ${isSaut ? "" : `<div class="frow"><span class="flabel">Avec</span>${Object.entries(FLAG_LABEL).map(([k, l]) => chip("data-fflag", k, f.flags.includes(k), l)).join("")}</div>`}
   </details>
-  <div class="results-bar"><span><b>${list.length}</b> mouvement${list.length > 1 ? "s" : ""}${arcView ? " en évidence" : ""}</span>${nActive ? `<button type="button" class="linkbtn" data-act="clearf">tout effacer</button>` : ""}
+  <div class="results-bar">${list.length || !arcView ? "" : `<span class="muted">aucun mouvement ne correspond aux filtres</span>`}${nActive ? `<button type="button" class="linkbtn" data-act="clearf">tout effacer</button>` : ""}
     <span class="muted hint-drag">${arcView ? `touche un mouvement pour sa fiche${isSaut ? "" : ", glisse-le dans l'enchaînement"}` : isSaut ? "" : "glisse une carte dans l'enchaînement, ou touche +"}</span></div>`;
 
   if (arcView) {
@@ -774,7 +774,7 @@ async function renderRecap() {
   const chip = (attr, val, on, label) => `<button type="button" class="fchip" ${attr}="${esc(val)}" aria-pressed="${on}">${label}</button>`;
   const date = (iso) => iso ? new Date(iso).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
 
-  let html = `<div class="recap-head"><h2>Mes enchaînements <span class="muted">${SAVED.length}</span></h2>
+  let html = `<div class="recap-head"><h2>Mes enchaînements</h2>
     <div class="recap-actions"><button class="btn primary big" type="button" data-act="create">+ Créer un enchaînement</button>
     <button class="btn" type="button" data-act="import">Importer un code</button>
     <button class="btn" type="button" data-act="export" title="Fichier de sauvegarde de tous tes enchaînements">Sauvegarder (fichier)</button>
@@ -790,7 +790,7 @@ async function renderRecap() {
   if (!SAVED.length) html += `<p class="empty">Aucun enchaînement pour l'instant.<br>Touche <b>Créer un enchaînement</b>, choisis l'agrès et le niveau : il sera enregistré ici automatiquement, au fil de tes modifications.</p>`;
   else if (!list.length) html += `<p class="empty">Aucun enchaînement ne correspond à ces filtres.</p>`;
   for (const g of names) {
-    html += `<section class="gym-group"><h3>${g ? esc(g) : "Sans gymnaste"} <span class="muted">${groups[g].length}</span></h3><ul class="rcards">`;
+    html += `<section class="gym-group"><h3>${g ? esc(g) : "Sans gymnaste"}</h3><ul class="rcards">`;
     for (const r of groups[g]) {
       const s = summary(r), app = APPS.find((a) => a.id === r.app);
       const thumbs = (r.app === "saut" ? r.jumps.map((j) => j.id) : r.items.map((i) => i.id)).filter((id) => BY_ID[id]?.img).slice(0, 8);
