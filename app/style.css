@@ -631,3 +631,4 @@ details.vid-add .vrow { margin-top: 8px; }
 div.filters { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; }
 .arches .fchip { font-size: 13px; padding: 6px 10px; }
 @media (min-width: 1100px) { #pane-catalogue .cards { grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 8px; } }
+.rq-search { width: 100%; margin: 4px 0 10px; }

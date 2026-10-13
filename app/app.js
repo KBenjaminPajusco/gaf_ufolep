@@ -663,60 +663,81 @@ function suggestFor(d, key) {
       + (p.a.side && p.a.side === p.b.side ? -3 : 0) + (rond(p.a) && back(p.b) ? -6 : 0) + (rond(p.b) ? 4 : 0)
       + (p.a.salto ? 3 : 0) + (held(p.a) || held(p.b) ? 4 : 0);
     pairs.sort((p, q) => pv(p) - pv(q));
-    const na = {}, nb = {}, seen = new Set(), keep = [];
-    for (const p of pairs) {
-      const ka = short(p.a), kb = short(p.b), kk = [ka, kb].sort().join(">"); // même nom à deux paliers, ou ordre inverse : une seule proposition
-      if (seen.has(kk) || (na[ka] || 0) >= 2 || (nb[kb] || 0) >= 2) continue;
-      seen.add(kk); na[ka] = (na[ka] || 0) + 1; nb[kb] = (nb[kb] || 0) + 1; keep.push(p);
-      if (keep.length >= 12) break;
-    }
-    // la liaison est-elle nécessaire ? (« 2 acros de sens différents » n'en demande pas)
-    for (const p of keep) {
-      const x = reqEval({ ...d, items: [...d.items, { id: p.a.id, link: "none", bar }, { id: p.b.id, link: "none", bar }] }, key);
-      p.link = x.ok ? "none" : "direct";
-    }
-    return { r, list: out, pairs: keep };
   }
   return { r, list: out, pairs };
 }
+// 12 paires au plus, variées (pas toujours le même mouvement) ; dit si la liaison est nécessaire
+// (« 2 acros de sens différents » n'en demande pas)
+function pickPairs(pairs, d, key) {
+  const na = {}, nb = {}, seen = new Set(), keep = [], bar = d.items.at(-1)?.bar || "BI";
+  for (const p of pairs) {
+    const ka = short(p.a), kb = short(p.b), kk = [ka, kb].sort().join(">"); // même nom à deux paliers, ou ordre inverse : une seule proposition
+    if (seen.has(kk) || (na[ka] || 0) >= 2 || (nb[kb] || 0) >= 2) continue;
+    seen.add(kk); na[ka] = (na[ka] || 0) + 1; nb[kb] = (nb[kb] || 0) + 1; keep.push(p);
+    if (keep.length >= 12) break;
+  }
+  for (const p of keep) if (!p.link) {
+    const x = reqEval({ ...d, items: [...d.items, { id: p.a.id, link: "none", bar }, { id: p.b.id, link: "none", bar }] }, key);
+    p.link = x.ok ? "none" : "direct";
+  }
+  return keep;
+}
 function openReqDetail(key) {
-  const d = draft(), ev = evaluate(d);
+  const d = draft(), ev = evaluate(d), dlg = $("#detail");
   const isTc = key.startsWith("tc"), r = reqRowOf(ev, key); if (!r) return;
   const stat = isTc ? (r.manual && !r.forced ? ["warn", "À juger"] : r.ok ? ["ok", "Exigence remplie · +1"] : ["ko", "Exigence non remplie · 0"])
     : r.kept ? ["ok", `Valorisation retenue · +${r.pts}`] : r.ok ? ["warn", `Possible mais pas retenue · ${r.pts} pts`] : r.manual && !r.forced ? ["warn", `À juger · ${r.pts} pts`] : ["ko", `Non validée · ${r.pts} pts`];
+  if (dlg._req !== key) state.rqq = "";
   const sg = suggestFor(d, key);
-  const order = (e) => (e.palier === "NOMADE" ? 9 : PAL_NUM[e.palier]);
-  const groups = new Map();
-  for (const x of sg.list.sort((a, b) => order(a.e) - order(b.e))) { if (!groups.has(x.e.arche)) groups.set(x.e.arche, []); groups.get(x.e.arche).push(x); }
-  const card = ({ e, link }) => { const st = status(e); return `<li class="sg-row"><button type="button" class="sg-el" data-detail="${e.id}" data-sglink="${link}" title="Voir la fiche">
-      ${e.img ? `<img src="img/${e.id}.webp" alt="" loading="lazy">` : ""}${palBadge(e, st)}
-      <span><b>${esc(e.name)}</b>${link === "direct" ? `<small>lié à l'élément précédent</small>` : ""}</span></button>
-      <button type="button" class="sg-add" data-sadd="${e.id}:${link}" aria-label="Ajouter ${esc(e.name)} à l'enchaînement">+</button></li>`; };
   let body;
   if (r.manual && !r.forced) body = `<p class="muted">L'appli ne peut pas vérifier cette exigence seule. Touche le rond à gauche de la ligne dans le barème pour la cocher si elle est réalisée.</p>`;
   else if (sg.info) body = `<p class="muted">${esc(sg.info)}</p>`;
   else if (!sg.list.length && !sg.pairs.length) body = `<p class="muted">${r.ok ? "C'est déjà rempli." : "Pas de proposition simple : il faut plusieurs mouvements ou un changement de barre (voir le barème)."}</p>`;
-  else {
-    const pairCard = ({ a, b, link }) => `<li class="sg-pair">
-      <button type="button" class="sg-el" data-detail="${a.id}" title="Voir la fiche">${a.img ? `<img src="img/${a.id}.webp" alt="" loading="lazy">` : ""}<span>${palBadge(a, status(a))} <b>${esc(short(a))}</b></span></button>
-      <span class="sg-arrow" aria-hidden="true">${link === "direct" ? "↔" : "+"}</span>
-      <button type="button" class="sg-el" data-detail="${b.id}" title="Voir la fiche">${b.img ? `<img src="img/${b.id}.webp" alt="" loading="lazy">` : ""}<span>${palBadge(b, status(b))} <b>${esc(short(b))}</b></span></button>
-      <button type="button" class="sg-add" data-padd="${a.id}:${b.id}:${link}" aria-label="Ajouter ${esc(short(a))} puis ${esc(short(b))}">+</button></li>`;
-    const lk = sg.pairs.some((p) => p.link === "direct");
-    body = (sg.list.length ? `<p class="muted">${sg.arches ? "Mouvements des arches que tu n'as pas encore." : r.ok ? "C'est rempli. Ces mouvements marcheraient aussi :" : "Un de ces mouvements suffit."} Touche + pour l'ajouter.</p>`
-      + [...groups].map(([a, xs]) => `<h4>${esc(a)}</h4><ul class="sg-list">${xs.map(card).join("")}</ul>`).join("") : "")
-      + (sg.pairs.length ? `<h4 class="sg-pairs-h">${sg.list.length ? "Ou deux" : "Deux"} mouvements ${lk ? "liés (sans pas entre les deux)" : "à ajouter"}</h4>
-        <p class="muted">Touche + pour ajouter les deux d'un coup${lk ? ", déjà liés" : ""}.</p><ul class="sg-list">${sg.pairs.map(pairCard).join("")}</ul>` : "");
-  }
-  const dlg = $("#detail");
+  else body = `<input class="search rq-search" id="rqq" type="search" placeholder="Cherche parmi ces mouvements : rondade flip…" value="${esc(state.rqq || "")}" aria-label="Chercher parmi les mouvements proposés" autocomplete="off">
+    <div id="rqRes"></div>`;
   dlg.innerHTML = `<form method="dialog" class="dlg">
     <header><span class="muted">${isTc ? "Tronc commun" : "Valorisation" + (r.s ? " principale (*)" : "")}</span><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
     <h3>${esc(r.t)}</h3>
     <div class="dl-status ${stat[0]}">${stat[1]}</div>
     ${body}
   </form>`;
-  dlg._req = key;
+  dlg._req = key; dlg._sg = sg;
+  renderReqResults();
   if (!dlg.open) dlg.showModal();
+}
+// résultats de la fenêtre d'une exigence, filtrés par la recherche mot par mot
+function renderReqResults() {
+  const dlg = $("#detail"), box = $("#rqRes"), sg = dlg._sg, key = dlg._req; if (!box || !sg) return;
+  const d = draft(), r = sg.r, q = state.rqq || "";
+  let list = sg.list, pairs = sg.pairs;
+  if (qWords(q).length) {
+    const pool = [...new Map([...list.map((x) => x.e), ...pairs.flatMap((p) => [p.a, p.b])].map((e) => [e.id, e])).values()];
+    const groups = searchGroups(q, pool), hit = new Map(); // id → { groupes trouvés, score }
+    groups.forEach((g, gi) => g.hits.forEach(([e, sc]) => { const h = hit.get(e.id) || { g: new Set(), s: 0 }; h.g.add(gi); h.s = Math.max(h.s, sc); hit.set(e.id, h); }));
+    list = list.filter((x) => hit.has(x.e.id)).sort((a, b) => hit.get(b.e.id).s - hit.get(a.e.id).s);
+    // une paire vaut plus si ses deux mouvements répondent à deux mots différents (« rondade flip » → rondade ↔ flic-flac)
+    const cover = (p) => new Set([...(hit.get(p.a.id)?.g || []), ...(hit.get(p.b.id)?.g || [])]).size + (hit.has(p.a.id) && hit.has(p.b.id) ? 0.5 : 0);
+    pairs = pairs.filter((p) => hit.has(p.a.id) || hit.has(p.b.id)).map((p, k) => [p, cover(p), k]).sort((x, y) => y[1] - x[1] || x[2] - y[2]).map(([p]) => p);
+  }
+  pairs = pickPairs(pairs, d, key);
+  const order = (e) => (e.palier === "NOMADE" ? 9 : PAL_NUM[e.palier]);
+  const groups = new Map();
+  for (const x of qWords(q).length ? list : [...list].sort((a, b) => order(a.e) - order(b.e))) { if (!groups.has(x.e.arche)) groups.set(x.e.arche, []); groups.get(x.e.arche).push(x); }
+  const card = ({ e, link }) => { const st = status(e); return `<li class="sg-row"><button type="button" class="sg-el" data-detail="${e.id}" data-sglink="${link}" title="Voir la fiche">
+      ${e.img ? `<img src="img/${e.id}.webp" alt="" loading="lazy">` : ""}${palBadge(e, st)}
+      <span><b>${esc(e.name)}</b>${link === "direct" ? `<small>lié à l'élément précédent</small>` : ""}</span></button>
+      <button type="button" class="sg-add" data-sadd="${e.id}:${link}" aria-label="Ajouter ${esc(e.name)} à l'enchaînement">+</button></li>`; };
+  const pairCard = ({ a, b, link }) => `<li class="sg-pair">
+      <button type="button" class="sg-el" data-detail="${a.id}" title="Voir la fiche">${a.img ? `<img src="img/${a.id}.webp" alt="" loading="lazy">` : ""}<span>${palBadge(a, status(a))} <b>${esc(short(a))}</b></span></button>
+      <span class="sg-arrow" aria-hidden="true">${link === "direct" ? "↔" : "+"}</span>
+      <button type="button" class="sg-el" data-detail="${b.id}" title="Voir la fiche">${b.img ? `<img src="img/${b.id}.webp" alt="" loading="lazy">` : ""}<span>${palBadge(b, status(b))} <b>${esc(short(b))}</b></span></button>
+      <button type="button" class="sg-add" data-padd="${a.id}:${b.id}:${link}" aria-label="Ajouter ${esc(short(a))} puis ${esc(short(b))}">+</button></li>`;
+  const lk = pairs.some((p) => p.link === "direct");
+  box.innerHTML = (!list.length && !pairs.length ? `<p class="muted">Aucun mouvement proposé ne correspond à « ${esc(q)} ».</p>` : "")
+    + (list.length ? `<p class="muted">${sg.arches ? "Mouvements des arches que tu n'as pas encore." : r.ok ? "C'est rempli. Ces mouvements marcheraient aussi :" : "Un de ces mouvements suffit."} Touche + pour l'ajouter.</p>`
+      + [...groups].map(([a, xs]) => `<h4>${esc(a)}</h4><ul class="sg-list">${xs.map(card).join("")}</ul>`).join("") : "")
+    + (pairs.length ? `<h4 class="sg-pairs-h">${list.length ? "Ou deux" : "Deux"} mouvements ${lk ? "liés (sans pas entre les deux)" : "à ajouter"}</h4>
+      <p class="muted">Touche + pour ajouter les deux d'un coup${lk ? ", déjà liés" : ""}.</p><ul class="sg-list">${pairs.map(pairCard).join("")}</ul>` : "");
 }
 
 // version courte pour le barème : « 2/4 : … » → « 2/4 », « Validé par : X » → « X »
@@ -1192,6 +1213,7 @@ document.addEventListener("input", (e) => {
   if (t.id === "q") { state.q = t.value; const pos = t.selectionStart; renderCatalogue(); const q = $("#q"); q.focus(); q.setSelectionRange(pos, pos); persist(); }
   else if (t.id === "rtName" || t.id === "rtGym") { d[t.id === "rtName" ? "name" : "gym"] = t.value; persist(); autosave(); if (t.id === "rtName" && $(".ctx-name")) $(".ctx-name").textContent = t.value || "Sans nom"; }
   else if (t.id === "impCode") previewImport();
+  else if (t.id === "rqq") { state.rqq = t.value; renderReqResults(); }
   else if (t.id === "rq") { (state.rf ||= {}).q = t.value; const pos = t.selectionStart; renderRecap().then(() => { const q = $("#rq"); q.focus(); q.setSelectionRange(pos, pos); }); persist(); }
 });
 document.addEventListener("change", async (e) => {
