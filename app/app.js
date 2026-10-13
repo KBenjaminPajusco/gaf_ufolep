@@ -545,19 +545,28 @@ function renderRoutine() {
   html += `<ol class="rt-list" id="rtList" ${noCat ? "hidden" : ""}>`;
   if (!d.items.length) html += `<li class="empty ph">${isMobile() ? "Touche <b>+ Ajouter un élément</b> pour choisir ton premier mouvement." : "Glisse des mouvements ici, ou touche + dans le catalogue."}<br><br>${EXAMPLES[state.app]?.level === state.level ? `<button class="btn" type="button" data-act="example">Remplir avec l'exemple ${EXAMPLES[state.app]?.label}</button>` : ""}</li>`;
   else {
-    H.items.forEach((it, k) => {
-      const st = { aut: it.aut, val: it.val };
-      const canIndirect = elApp() === "sol" && it.kind === "saut" && H.items[k - 1]?.kind === "saut";
-      const linkTxt = it.link === "direct" ? "lié" : it.link === "indirect" ? "lié par pas" : "lier";
-      html += `<li class="rt-item ${it.aut ? "" : "bad"} ${it.link !== "none" ? "linked" : ""}" data-eid="${it.id}">
-        <span class="idx" title="glisser pour déplacer">${k + 1}</span><button type="button" class="rt-open" data-detail="${it.id}" data-pos="${k}" aria-label="Voir la fiche : ${esc(it.name)}">${it.img ? `<img class="rt-thumb" src="img/${it.id}.webp" alt="" draggable="false">` : palBadge(it, st)}</button>
-        <div><div class="nm" data-detail="${it.id}" data-pos="${k}" title="Voir la fiche">${it.img ? palBadge(it, st) + " " : ""}${esc(short(it))} ${lab[k] ? `<span class="series-tag">${lab[k]}</span>` : ""}</div></div>
-        <div class="ctrl">
-          ${k > 0 && !(state.app === "poutre" && it.mousse !== H.items[k - 1].mousse) ? `<button class="mini" type="button" data-link="${k}" aria-pressed="${it.link !== "none"}" title="Liaison avec l'élément précédent${canIndirect ? " (directe ou par pas : PG)" : ""}">↔ ${linkTxt}</button>` : ""}
-          ${state.app === "barres" ? `<button class="mini" type="button" data-bar="${k}" aria-pressed="${it.bar === "BS"}">${it.bar}</button>` : ""}
-          ${it.mousse ? `<span class="beam-tag">poutre mousse</span>` : ""}
-          <button class="mini icon" type="button" data-del="${k}" aria-label="Retirer">×</button>
-        </div></li>`;
+    // les éléments liés entre eux sont regroupés côte à côte (une série = un bloc qu'on déplace d'un seul geste)
+    const groups = [];
+    H.items.forEach((it, k) => { if (k === 0 || it.link === "none") groups.push([]); groups.at(-1).push(k); });
+    groups.forEach((g) => {
+      const series = g.length > 1;
+      html += `<li class="rt-item rt-group ${series ? "series" : ""}">${series && lab[g[0]] ? `<span class="series-tag">${lab[g[0]]}</span>` : ""}<div class="rt-row">`;
+      g.forEach((k, j) => {
+        const it = H.items[k], st = { aut: it.aut, val: it.val };
+        const canIndirect = elApp() === "sol" && it.kind === "saut" && H.items[k - 1]?.kind === "saut";
+        const canLink = k > 0 && !(state.app === "poutre" && it.mousse !== H.items[k - 1].mousse);
+        if (j > 0) html += `<button type="button" class="rt-chain ${it.link}" data-link="${k}" title="${it.link === "indirect" ? "Lié par pas" : "Lié"} : toucher pour changer${canIndirect ? " (direct, par pas, pas lié)" : ""}">${it.link === "indirect" ? "pas" : "↔"}</button>`;
+        html += `<div class="rt-el ${it.aut ? "" : "bad"}" data-eid="${it.id}">
+          <button type="button" class="rt-open" data-detail="${it.id}" data-pos="${k}" aria-label="Voir la fiche : ${esc(it.name)}">${it.img ? `<img class="rt-thumb" src="img/${it.id}.webp" alt="" draggable="false">` : `<span class="rt-noimg">${esc(short(it))}</span>`}<span class="idx">${k + 1}</span></button>
+          <div class="nm" data-detail="${it.id}" data-pos="${k}" title="Voir la fiche">${palBadge(it, st)} ${esc(short(it))}</div>
+          <div class="ctrl">
+            ${j === 0 && canLink ? `<button class="mini" type="button" data-link="${k}" title="Lier à l'élément d'avant${canIndirect ? " (directe ou par pas : PG)" : ""}">↔ lier</button>` : ""}
+            ${state.app === "barres" ? `<button class="mini" type="button" data-bar="${k}" aria-pressed="${it.bar === "BS"}">${it.bar}</button>` : ""}
+            ${it.mousse ? `<span class="beam-tag">mousse</span>` : ""}
+            <button class="mini icon" type="button" data-del="${k}" aria-label="Retirer">×</button>
+          </div></div>`;
+      });
+      html += `</div></li>`;
     });
   }
   html += `</ol></div>
@@ -573,23 +582,28 @@ function renderRoutine() {
 // glisser-déposer : depuis les cartes du catalogue (ajout) et dans la liste (réordonner)
 function initRoutineDnD(d) {
   const ol = $("#rtList"); if (!ol || !window.Sortable) return;
+  // début de chaque bloc dans d.items (un bloc commence à chaque élément non lié)
+  const starts = () => buildCtx(d, state.level, state.app).items.map((it, k) => (k === 0 || it.link === "none" ? k : -1)).filter((k) => k >= 0);
   const indexOf = (node) => [...ol.children].filter((n) => n.classList.contains("rt-item") || n === node).indexOf(node);
   Sortable.create(ol, {
     group: { name: "els", pull: false, put: true }, draggable: ".rt-item", animation: 150, forceFallback: true, onStart: dragOn, onEnd: dragOff, fallbackTolerance: 4,
-    filter: "button, .nm", preventOnFilter: false, delay: 150, delayOnTouchOnly: true, ghostClass: "ghost",
+    filter: ".ctrl, .rt-chain", preventOnFilter: false, delay: 150, delayOnTouchOnly: true, ghostClass: "ghost",
     onAdd(evt) {
-      const id = evt.item.dataset.id, at = indexOf(evt.item);
+      const id = evt.item.dataset.id, gi = indexOf(evt.item);
       evt.item.remove();
       if (!BY_ID[id]) return;
+      const st = starts(), at = gi < st.length ? st[gi] : d.items.length;
       const prev = d.items[at - 1];
       d.items.splice(at, 0, { id, link: "none", bar: prev?.bar || "BI" });
       d.items[0].link = "none";
       toast(`Ajouté en position ${at + 1}`); render();
     },
     onUpdate(evt) {
-      const [m] = d.items.splice(evt.oldDraggableIndex, 1);
-      d.items.splice(evt.newDraggableIndex, 0, m);
-      d.items[0].link = "none"; render();
+      const st = starts(), bounds = st.map((a, g) => [a, st[g + 1] ?? d.items.length]);
+      const blocks = bounds.map(([a, b]) => d.items.slice(a, b));
+      const [m] = blocks.splice(evt.oldDraggableIndex, 1);
+      blocks.splice(evt.newDraggableIndex, 0, m);
+      blocks.forEach((b) => { b[0].link = "none"; }); d.items = blocks.flat(); render();
     },
   });
 }
@@ -1131,7 +1145,7 @@ document.addEventListener("click", async (e) => {
     if ($("#detail").open) $("#detail").close();
     toast(`Ajouté : ${BY_ID[ds.add].name.slice(0, 40)}`);
     // téléphone : retour à l'enchaînement, sauf pendant une recherche de plusieurs mouvements (on les ajoute à la suite)
-    if (isMobile() && qWords(state.q).length < 2) { state.view = "routine"; render(); requestAnimationFrame(() => $("#rtList .rt-item:last-child")?.scrollIntoView({ block: "center" })); return; }
+    if (isMobile() && qWords(state.q).length < 2) { state.view = "routine"; render(); requestAnimationFrame(() => [...document.querySelectorAll("#rtList .rt-el")].at(-1)?.scrollIntoView({ block: "center" })); return; }
   } else if (ds.link) {
     const it = d.items[ds.link], cur = BY_ID[it.id], pv = BY_ID[d.items[ds.link - 1].id];
     const cycle = elApp() === "sol" && cur.kind === "saut" && pv.kind === "saut" ? ["none", "direct", "indirect"] : ["none", "direct"];
@@ -1154,7 +1168,7 @@ document.addEventListener("click", async (e) => {
     const ex = EXAMPLES[state.app]; state.level = ex.level;
     const find = (re, pal) => ELS.find((x) => x.app === elApp() && re.test(x.name) && (!pal || x.palier === pal))?.id;
     const items = ex.items.map(([re, pal, o]) => ({ id: find(re, pal), link: "none", bar: "BI", ...o })).filter((x) => x.id);
-    state.drafts[draftKey()] = { ...draft(), name: `Exemple ${ex.label}`, items };
+    state.drafts[draftKey()] = { ...draft(), name: draft().name || `Exemple ${ex.label}`, items };
     toast(`Exemple ${ex.label} chargé`);
   } else if (ds.act === "create") { openCreate(); return; }
   else if (ds.capp || ds.clvl || ds.cdisc) {
@@ -1224,14 +1238,14 @@ document.addEventListener("mouseover", (e) => {
     const key = "req:" + (rq.dataset.hl || "");
     if (key !== hoverLink.cur) {
       hoverLink.cur = key; hoverLink(null);
-      const rows = [...document.querySelectorAll("#rtList .rt-item")];
+      const rows = [...document.querySelectorAll("#rtList .rt-el")];
       (rq.dataset.hl || "").split(",").filter(Boolean).forEach((i) => rows[i]?.classList.add("hl"));
     }
     return;
   }
-  const n = e.target.closest?.("#archeCanvas .hs, #cards .card-el, #rtList .rt-item");
+  const n = e.target.closest?.("#archeCanvas .hs, #cards .card-el, #rtList .rt-el");
   const id = n ? n.dataset.id || n.dataset.eid : null;
-  if (id !== hoverLink.cur) { hoverLink.cur = id; hoverLink(id, !!n && !n.classList.contains("rt-item")); }
+  if (id !== hoverLink.cur) { hoverLink.cur = id; hoverLink(id, !!n && !n.classList.contains("rt-el")); }
 });
 $("#detail")?.addEventListener("close", () => { state.detail = null; state.detailPos = null; state.fromReq = null; $("#detail")._req = null; });
 document.addEventListener("input", (e) => {
