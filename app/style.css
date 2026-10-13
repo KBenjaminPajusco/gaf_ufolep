@@ -674,6 +674,3 @@ div.filters { background: var(--surface); border: 1px solid var(--line); border-
 @media (max-width: 520px) { .rt-el { width: calc(50vw - 66px); } .rt-el .rt-thumb, .rt-el .rt-noimg { height: 72px; } }
 .rt-el > * { grid-column: 1 / -1 !important; margin-top: 0; }
 .rt-el { grid-template-columns: minmax(0, 1fr); }
-/* une ligne par bloc : seuls les éléments liés sont côte à côte */
-#rtList.rt-list { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 10px; }
-#rtList .rt-item.rt-group { align-self: flex-start; max-width: 100%; }
