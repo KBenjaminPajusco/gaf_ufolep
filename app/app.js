@@ -835,7 +835,7 @@ function renderSheet() {
   const cb = (on, part) => `<span class="sh-box ${on ? "on" : part ? "part" : ""}" aria-hidden="true">${on ? "✓" : part ? "~" : ""}</span>`;
   const pk = (e) => `<i class="pk">${e.palier === "NOMADE" ? "N" : e.palier}</i>`;
   const archesTc = ev.tc.find((r) => /arches$/.test(r.t));
-  const els = ELS.filter((e) => e.app === elApp() && status(e).aut);
+  const els = ELS.filter((e) => e.app === elApp() && (status(e).val && e.palier !== "NOMADE" || inR.has(e.id))); // fiche allégée : seulement ce qui rapporte des points (+ ce qui est déjà dans l'enchaînement)
   const arches = [...new Set(els.map((e) => e.arche))];
   const PALS = ["PR", "P1", "P2", "P3", "P4", "P5", "P6", "P7", "N"];
 
