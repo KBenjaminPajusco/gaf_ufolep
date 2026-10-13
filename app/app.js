@@ -624,14 +624,14 @@ function reqEval(d, key, level = state.level, app = state.app) {
 }
 function suggestFor(d, key) {
   const ev = evaluate(d), r = reqRowOf(ev, key), isTc = key.startsWith("tc");
-  if (!r || r.manual) return { r, list: [], pairs: [] };
+  if (!r || r.manual) return { r, list: [], series: [] };
   const cands = ELS.filter((e) => e.app === elApp() && status(e).aut);
   // « 4 arches » : uniquement les éléments des arches absentes de l'enchaînement
   if (isTc && /arches$/.test(r.t)) {
     const have = new Set(ev.H.counted.map((it) => it.arche));
-    return { r, list: cands.filter((e) => !have.has(e.arche)).map((e) => ({ e, link: "none" })), pairs: [], arches: true };
+    return { r, list: cands.filter((e) => !have.has(e.arche)).map((e) => ({ e, link: "none" })), series: [], arches: true };
   }
-  if (isTc && /éléments$/.test(r.t)) return { r, list: [], pairs: [], info: "Ajoute des mouvements différents depuis le catalogue jusqu'à atteindre le nombre demandé." };
+  if (isTc && /éléments$/.test(r.t)) return { r, list: [], series: [], info: "Ajoute des mouvements différents depuis le catalogue jusqu'à atteindre le nombre demandé." };
   const n = d.items.length, last = d.items.at(-1), bar = last?.bar || "BI";
   const base = reqEval(d, key);
   const better = (x) => (isTc ? x.ok && !base.ok || (!base.ok && x.n > base.n) : x.ok && !base.ok);
@@ -644,41 +644,64 @@ function suggestFor(d, key) {
     }
   }
   // 2) exigence pas encore remplie : deux mouvements liés entre eux (LA, LAE, PG, 2 salti…)
-  const pairs = [];
-  if (!base.ok) {
-    const pc = cands.filter((e) => e.palier !== "NOMADE");
+  const pairs = [], pc = cands.filter((e) => e.palier !== "NOMADE");
+  // valorisation possible mais pas comptée (ses mouvements servent déjà ailleurs) : on propose aussi des séries neuves
+  if (!base.ok || (!isTc && !r.kept)) {
     for (const a of pc) {
-      if (single.has(a.id)) continue;
+      if (!base.ok && single.has(a.id)) continue;
       for (const b of pc) {
-        if (single.has(b.id)) continue;
+        if (!base.ok && single.has(b.id)) continue;
         const x = reqEval({ ...d, items: [...d.items, { id: a.id, link: "none", bar }, { id: b.id, link: "direct", bar }] }, key);
         if (x.ok && (x.usesAll ? x.usesAll([n, n + 1]) : x.uses(n) && x.uses(n + 1))) pairs.push({ a, b });
       }
     }
-    // les plus simples d'abord, variés (pas toujours le même mouvement), deux mouvements différents de préférence
     // + des enchaînements qui se font vraiment : même sens de rotation, rondade en premier (elle part vers l'arrière),
-    // salto plutôt en dernier, pas d'élément tenu au milieu d'une liaison
+    // salto plutôt en dernier, pas d'élément tenu au milieu d'une liaison, deux mouvements différents de préférence
     const back = (e) => ARRIERE.includes(e.side), rond = (e) => /^rondade/i.test(e.name), held = (e) => /tenu|tenue|maintien/i.test(e.name);
-    const pv = (p) => PAL_NUM[p.a.palier] + PAL_NUM[p.b.palier] + (p.a.id === p.b.id ? 20 : 0)
-      + (p.a.side && p.a.side === p.b.side ? -3 : 0) + (rond(p.a) && back(p.b) ? -6 : 0) + (rond(p.b) ? 4 : 0)
-      + (p.a.salto ? 3 : 0) + (held(p.a) || held(p.b) ? 4 : 0);
-    pairs.sort((p, q) => pv(p) - pv(q));
+    const step = (x, y) => (x.id === y.id ? 20 : 0) + (x.side && x.side === y.side ? -3 : 0) + (rond(x) && back(y) ? -6 : 0) + (rond(y) ? 4 : 0) + (x.salto ? 3 : 0);
+    const pv = (els) => (els.reduce((t, e) => t + PAL_NUM[e.palier] + (held(e) ? 4 : 0), 0) + els.slice(1).reduce((t, e, k) => t + step(els[k], e), 0)
+      + (els.length - new Set(els.map(short)).size) * 12) / els.length; // le même mouvement deux fois : en dernier
+    pairs.sort((p, q) => pv([p.a, p.b]) - pv([q.a, q.b]));
+    let series = pairs.map((p) => ({ els: [p.a, p.b] }));
+    // 3) séries de 3 : on prolonge les meilleures paires devant ou derrière (rondade – flic-flac – salto)
+    const top = [], seenTop = new Set();
+    for (const x of series) { const k = x.els.map(short).join(">"); if (!seenTop.has(k)) { seenTop.add(k); top.push(x); } if (top.length >= 30) break; }
+    const rows = (els) => els.map((e, k) => ({ id: e.id, link: k ? "direct" : "none", bar }));
+    const idx3 = [n, n + 1, n + 2];
+    for (const x of top) for (const c of pc) for (const els of [[...x.els, c], [c, ...x.els]]) {
+      const y = reqEval({ ...d, items: [...d.items, ...rows(els)] }, key);
+      if (y.ok && (y.usesAll ? y.usesAll(idx3) : idx3.every((i) => y.uses(i)))) series.push({ els, link: "direct" });
+    }
+    // une proposition par suite de noms ; les plus simples d'abord, puis on garde les 60 meilleures pour les noter
+    const seen = new Set();
+    series = series.map((x) => ({ ...x, pv: pv(x.els) })).sort((a, b) => a.pv - b.pv)
+      .filter((x) => { const nm = x.els.map(short), k = (nm.length === 2 ? nm.sort() : nm).join(">"); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 60);
+    // ce que la série rapporte en plus : points de la note de départ (valo + tronc commun) et arches nouvelles
+    const have = new Set(ev.H.counted.map((it) => it.arche));
+    for (const x of series) {
+      const e2 = evaluate({ ...d, items: [...d.items, ...rows(x.els)] });
+      x.gain = e2.nd - ev.nd;
+      x.arches = [...new Set(x.els.map((e) => e.arche))].map((a) => ({ a, neu: !have.has(a) }));
+    }
+    series.sort((a, b) => b.gain - a.gain || b.arches.filter((z) => z.neu).length - a.arches.filter((z) => z.neu).length || a.pv - b.pv);
+    return { r, list: out, series };
   }
-  return { r, list: out, pairs };
+  return { r, list: out, series: [] };
 }
-// 12 paires au plus, variées (pas toujours le même mouvement) ; dit si la liaison est nécessaire
+// 10 séries au plus, variées (pas toujours le même mouvement) ; pour 2 éléments, dit si la liaison est nécessaire
 // (« 2 acros de sens différents » n'en demande pas)
-function pickPairs(pairs, d, key) {
-  const na = {}, nb = {}, seen = new Set(), keep = [], bar = d.items.at(-1)?.bar || "BI";
-  for (const p of pairs) {
-    const ka = short(p.a), kb = short(p.b), kk = [ka, kb].sort().join(">"); // même nom à deux paliers, ou ordre inverse : une seule proposition
-    if (seen.has(kk) || (na[ka] || 0) >= 2 || (nb[kb] || 0) >= 2) continue;
-    seen.add(kk); na[ka] = (na[ka] || 0) + 1; nb[kb] = (nb[kb] || 0) + 1; keep.push(p);
-    if (keep.length >= 12) break;
+function pickSeries(series, d, key) {
+  const nf = {}, ne = {}, keep = [], bar = d.items.at(-1)?.bar || "BI";
+  for (const x of series) {
+    const names = x.els.map(short);
+    if ((nf[names[0]] || 0) >= 2 || names.some((m) => (ne[m] || 0) >= 4)) continue;
+    nf[names[0]] = (nf[names[0]] || 0) + 1; names.forEach((m) => (ne[m] = (ne[m] || 0) + 1)); keep.push(x);
+    if (keep.length >= 10) break;
   }
-  for (const p of keep) if (!p.link) {
-    const x = reqEval({ ...d, items: [...d.items, { id: p.a.id, link: "none", bar }, { id: p.b.id, link: "none", bar }] }, key);
-    p.link = x.ok ? "none" : "direct";
+  for (const x of keep) if (!x.link) {
+    const y = reqEval({ ...d, items: [...d.items, ...x.els.map((e) => ({ id: e.id, link: "none", bar }))] }, key);
+    const idx = x.els.map((_, k) => d.items.length + k);
+    x.link = y.ok && (y.usesAll ? y.usesAll(idx) : idx.every((i) => y.uses(i))) ? "none" : "direct";
   }
   return keep;
 }
@@ -688,38 +711,41 @@ function openReqDetail(key) {
   const stat = isTc ? (r.manual && !r.forced ? ["warn", "À juger"] : r.ok ? ["ok", "Exigence remplie · +1"] : ["ko", "Exigence non remplie · 0"])
     : r.kept ? ["ok", `Valorisation retenue · +${r.pts}`] : r.ok ? ["warn", `Possible mais pas retenue · ${r.pts} pts`] : r.manual && !r.forced ? ["warn", `À juger · ${r.pts} pts`] : ["ko", `Non validée · ${r.pts} pts`];
   if (dlg._req !== key) state.rqq = "";
-  const sg = suggestFor(d, key);
-  let body;
-  if (r.manual && !r.forced) body = `<p class="muted">L'appli ne peut pas vérifier cette exigence seule. Touche le rond à gauche de la ligne dans le barème pour la cocher si elle est réalisée.</p>`;
-  else if (sg.info) body = `<p class="muted">${esc(sg.info)}</p>`;
-  else if (!sg.list.length && !sg.pairs.length) body = `<p class="muted">${r.ok ? "C'est déjà rempli." : "Pas de proposition simple : il faut plusieurs mouvements ou un changement de barre (voir le barème)."}</p>`;
-  else body = `<input class="search rq-search" id="rqq" type="search" placeholder="Cherche parmi ces mouvements : rondade flip…" value="${esc(state.rqq || "")}" aria-label="Chercher parmi les mouvements proposés" autocomplete="off">
-    <div id="rqRes"></div>`;
+  const manual = r.manual && !r.forced;
+  const body = manual ? `<p class="muted">L'appli ne peut pas vérifier cette exigence seule. Touche le rond à gauche de la ligne dans le barème pour la cocher si elle est réalisée.</p>`
+    : `<input class="search rq-search" id="rqq" type="search" placeholder="Cherche parmi ces mouvements : rondade flip…" value="${esc(state.rqq || "")}" aria-label="Chercher parmi les mouvements proposés" autocomplete="off">
+    <div id="rqRes"><p class="muted rq-wait">Je cherche des enchaînements…</p></div>`;
   dlg.innerHTML = `<form method="dialog" class="dlg">
     <header><span class="muted">${isTc ? "Tronc commun" : "Valorisation" + (r.s ? " principale (*)" : "")}</span><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
     <h3>${esc(r.t)}</h3>
     <div class="dl-status ${stat[0]}">${stat[1]}</div>
     ${body}
   </form>`;
-  dlg._req = key; dlg._sg = sg;
-  renderReqResults();
+  dlg._req = key; dlg._sg = null;
   if (!dlg.open) dlg.showModal();
+  // le calcul des séries prend un peu de temps : la fenêtre s'affiche d'abord
+  if (!manual) setTimeout(() => { if (dlg._req !== key || !dlg.open) return; dlg._sg = suggestFor(draft(), key); renderReqResults(); }, 30);
 }
 // résultats de la fenêtre d'une exigence, filtrés par la recherche mot par mot
 function renderReqResults() {
   const dlg = $("#detail"), box = $("#rqRes"), sg = dlg._sg, key = dlg._req; if (!box || !sg) return;
   const d = draft(), r = sg.r, q = state.rqq || "";
-  let list = sg.list, pairs = sg.pairs;
+  if (sg.info || (!sg.list.length && !sg.series.length)) {
+    $("#rqq")?.remove();
+    box.innerHTML = `<p class="muted">${esc(sg.info || (r.ok ? "C'est déjà rempli." : "Pas de proposition simple : il faut plusieurs mouvements ou un changement de barre (voir le barème)."))}</p>`;
+    return;
+  }
+  let list = sg.list, series = sg.series;
   if (qWords(q).length) {
-    const pool = [...new Map([...list.map((x) => x.e), ...pairs.flatMap((p) => [p.a, p.b])].map((e) => [e.id, e])).values()];
+    const pool = [...new Map([...list.map((x) => x.e), ...series.flatMap((x) => x.els)].map((e) => [e.id, e])).values()];
     const groups = searchGroups(q, pool), hit = new Map(); // id → { groupes trouvés, score }
     groups.forEach((g, gi) => g.hits.forEach(([e, sc]) => { const h = hit.get(e.id) || { g: new Set(), s: 0 }; h.g.add(gi); h.s = Math.max(h.s, sc); hit.set(e.id, h); }));
     list = list.filter((x) => hit.has(x.e.id)).sort((a, b) => hit.get(b.e.id).s - hit.get(a.e.id).s);
-    // une paire vaut plus si ses deux mouvements répondent à deux mots différents (« rondade flip » → rondade ↔ flic-flac)
-    const cover = (p) => new Set([...(hit.get(p.a.id)?.g || []), ...(hit.get(p.b.id)?.g || [])]).size + (hit.has(p.a.id) && hit.has(p.b.id) ? 0.5 : 0);
-    pairs = pairs.filter((p) => hit.has(p.a.id) || hit.has(p.b.id)).map((p, k) => [p, cover(p), k]).sort((x, y) => y[1] - x[1] || x[2] - y[2]).map(([p]) => p);
+    // une série vaut plus si ses mouvements répondent à plusieurs mots (« rondade flip salto » → rondade – flic-flac – salto)
+    const cover = (x) => new Set(x.els.flatMap((e) => [...(hit.get(e.id)?.g || [])])).size + x.els.filter((e) => hit.has(e.id)).length / 10;
+    series = series.filter((x) => x.els.some((e) => hit.has(e.id))).map((x, k) => [x, cover(x), k]).sort((a, b) => b[1] - a[1] || a[2] - b[2]).map(([x]) => x);
   }
-  pairs = pickPairs(pairs, d, key);
+  series = pickSeries(series, d, key);
   const order = (e) => (e.palier === "NOMADE" ? 9 : PAL_NUM[e.palier]);
   const groups = new Map();
   for (const x of qWords(q).length ? list : [...list].sort((a, b) => order(a.e) - order(b.e))) { if (!groups.has(x.e.arche)) groups.set(x.e.arche, []); groups.get(x.e.arche).push(x); }
@@ -727,17 +753,17 @@ function renderReqResults() {
       ${e.img ? `<img src="img/${e.id}.webp" alt="" loading="lazy">` : ""}${palBadge(e, st)}
       <span><b>${esc(e.name)}</b>${link === "direct" ? `<small>lié à l'élément précédent</small>` : ""}</span></button>
       <button type="button" class="sg-add" data-sadd="${e.id}:${link}" aria-label="Ajouter ${esc(e.name)} à l'enchaînement">+</button></li>`; };
-  const pairCard = ({ a, b, link }) => `<li class="sg-pair">
-      <button type="button" class="sg-el" data-detail="${a.id}" title="Voir la fiche">${a.img ? `<img src="img/${a.id}.webp" alt="" loading="lazy">` : ""}<span>${palBadge(a, status(a))} <b>${esc(short(a))}</b></span></button>
-      <span class="sg-arrow" aria-hidden="true">${link === "direct" ? "↔" : "+"}</span>
-      <button type="button" class="sg-el" data-detail="${b.id}" title="Voir la fiche">${b.img ? `<img src="img/${b.id}.webp" alt="" loading="lazy">` : ""}<span>${palBadge(b, status(b))} <b>${esc(short(b))}</b></span></button>
-      <button type="button" class="sg-add" data-padd="${a.id}:${b.id}:${link}" aria-label="Ajouter ${esc(short(a))} puis ${esc(short(b))}">+</button></li>`;
-  const lk = pairs.some((p) => p.link === "direct");
-  box.innerHTML = (!list.length && !pairs.length ? `<p class="muted">Aucun mouvement proposé ne correspond à « ${esc(q)} ».</p>` : "")
-    + (list.length ? `<p class="muted">${sg.arches ? "Mouvements des arches que tu n'as pas encore." : r.ok ? "C'est rempli. Ces mouvements marcheraient aussi :" : "Un de ces mouvements suffit."} Touche + pour l'ajouter.</p>`
-      + [...groups].map(([a, xs]) => `<h4>${esc(a)}</h4><ul class="sg-list">${xs.map(card).join("")}</ul>`).join("") : "")
-    + (pairs.length ? `<h4 class="sg-pairs-h">${list.length ? "Ou deux" : "Deux"} mouvements ${lk ? "liés (sans pas entre les deux)" : "à ajouter"}</h4>
-      <p class="muted">Touche + pour ajouter les deux d'un coup${lk ? ", déjà liés" : ""}.</p><ul class="sg-list">${pairs.map(pairCard).join("")}</ul>` : "");
+  const chip = (e) => `<button type="button" class="sg-el" data-detail="${e.id}" title="Voir la fiche">${e.img ? `<img src="img/${e.id}.webp" alt="" loading="lazy">` : ""}<span>${palBadge(e, status(e))} <b>${esc(short(e))}</b></span></button>`;
+  const seriesCard = (x) => `<li class="sg-series">
+      <div class="chain">${x.els.map(chip).join(`<span class="sg-arrow" aria-hidden="true">${x.link === "direct" ? "↔" : "+"}</span>`)}</div>
+      <div class="sg-meta">${x.gain > 0 ? `<span class="gain">+${fmt(x.gain)} pt${x.gain > 1 ? "s" : ""}</span>` : ""}${x.arches.map((z) => `<span class="arc ${z.neu ? "neu" : ""}" title="${z.neu ? "arche que tu n'as pas encore" : ""}">${esc(z.a)}${z.neu ? " ★" : ""}</span>`).join("")}</div>
+      <button type="button" class="sg-add" data-padd="${x.els.map((e) => e.id).join(",")}:${x.link}" aria-label="Ajouter ${esc(x.els.map(short).join(" puis "))}">+</button></li>`;
+  const lk = series.some((x) => x.link === "direct");
+  box.innerHTML = (!list.length && !series.length ? `<p class="muted">Aucun mouvement proposé ne correspond à « ${esc(q)} ».</p>` : "")
+    + (series.length ? `<h4 class="sg-pairs-h">Enchaînements tout faits</h4>
+      <p class="muted">Touche + pour ajouter toute la série${lk ? ", déjà liée" : ""}. ★ = arche que tu n'as pas encore.</p><ul class="sg-list">${series.map(seriesCard).join("")}</ul>` : "")
+    + (list.length ? `<h4 class="sg-pairs-h">${series.length ? "Ou un seul mouvement" : sg.arches ? "Mouvements des arches que tu n'as pas encore" : r.ok ? "C'est rempli. Ces mouvements marcheraient aussi" : "Un de ces mouvements suffit"}</h4><p class="muted">Touche + pour l'ajouter.</p>`
+      + [...groups].map(([a, xs]) => `<h4>${esc(a)}</h4><ul class="sg-list">${xs.map(card).join("")}</ul>`).join("") : "");
 }
 
 // version courte pour le barème : « 2/4 : … » → « 2/4 », « Validé par : X » → « X »
@@ -1075,10 +1101,10 @@ document.addEventListener("click", async (e) => {
     render(); toast(`Ajouté : ${BY_ID[id].name.slice(0, 40)}`); openReqDetail(back); return;
   }
   else if (ds.padd) {
-    const [a, b2, link] = ds.padd.split(":"); const prev = d.items.at(-1);
-    d.items.push({ id: a, link: "none", bar: prev?.bar || "BI" }, { id: b2, link, bar: prev?.bar || "BI" });
+    const [ids, link] = ds.padd.split(":"), list = ids.split(","), prev = d.items.at(-1);
+    list.forEach((id, k) => d.items.push({ id, link: k ? link : "none", bar: prev?.bar || "BI" }));
     const back = $("#detail")._req; state.detail = null; state.fromReq = null;
-    render(); toast(`Ajoutés : ${short(BY_ID[a])} ${link === "direct" ? "↔" : "+"} ${short(BY_ID[b2])}`); openReqDetail(back); return;
+    render(); toast(`Ajoutés : ${list.map((id) => short(BY_ID[id])).join(link === "direct" ? " ↔ " : " + ")}`); openReqDetail(back); return;
   }
   else if (ds.detail) { e.preventDefault(); state.fromReq = b.closest("#detail") ? $("#detail")._req || null : null; state.sgLink = ds.sglink || null; state.detail = ds.detail; state.detailPos = ds.pos != null ? Number(ds.pos) : null; renderDetail(); return; }
   else if ("archePick" in ds) { F().arche = ds.archePick; F().side = ""; F().kind = ""; }
