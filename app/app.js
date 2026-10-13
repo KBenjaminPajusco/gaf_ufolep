@@ -51,6 +51,7 @@ const isMobile = () => window.matchMedia?.("(max-width: 899px)").matches;
 const isMousse = (id) => BY_ID[id]?.arche === "Acro poutre mousse"; // ces éléments se font sur la poutre mousse
 const LS_KEY = "palier-v1";
 const state = load() || { level: "B1", app: "sol", view: "catalogue", filter: "aut", q: "", drafts: {} };
+state.fOpen = false; state.renaming = false;
 state.media = {}; state.detail = null;
 
 function load() { try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch { return null; } }
@@ -307,7 +308,8 @@ function lev(a, b, max) {
   }
   return prev[b.length];
 }
-const qWords = (q) => norm(q).split(" ").filter((w) => w && !STOP.has(w)).map((w) => SYNO[w] || w);
+const qRaw = (q) => norm(q).split(" ").filter((w) => w && !STOP.has(w));
+const qWords = (q) => qRaw(q).map((w) => SYNO[w] || w);
 const tokIndex = new Map(); // id → { head: mots du nom court, all: tous les mots }
 function toks(e) {
   let t = tokIndex.get(e.id);
@@ -344,16 +346,16 @@ function wordScore0(w, e) {
 }
 // découpe la recherche en groupes : on colle des mots voisins seulement s'ils désignent ensemble un même mouvement
 function searchGroups(q, pool) {
-  const ws = qWords(q), out = [];
+  const ws = qWords(q), raw = qRaw(q), out = [];
   for (let i = 0; i < ws.length;) {
     let done = false;
     for (let n = Math.min(4, ws.length - i); n >= 2 && !done; n--) {
       const span = ws.slice(i, i + n);
       // tous les mots dans le nom court du même mouvement (exact, début de mot ou même son)
       const hits = pool.map((e) => [e, span.map((w) => wordScore(w, e))]).filter(([, ss]) => ss.every((s) => s >= 4.5)).map(([e, ss]) => [e, ss.reduce((a, b) => a + b, 0)]);
-      if (hits.length) { out.push({ words: span, hits }); i += n; done = true; }
+      if (hits.length) { out.push({ words: span, label: raw.slice(i, i + n), hits }); i += n; done = true; }
     }
-    if (!done) { const w = ws[i]; out.push({ words: [w], hits: pool.map((e) => [e, wordScore(w, e)]).filter(([, s]) => s > 0) }); i++; }
+    if (!done) { const w = ws[i]; out.push({ words: [w], label: [raw[i]], hits: pool.map((e) => [e, wordScore(w, e)]).filter(([, s]) => s > 0) }); i++; }
   }
   // dans chaque groupe, les correspondances approximatives s'effacent devant les bonnes
   for (const g of out) { const best = Math.max(0, ...g.hits.map(([, s]) => s)); g.hits = g.hits.filter(([, s]) => s >= best - 1.5 * g.words.length); }
@@ -368,8 +370,6 @@ function catalogueList(arche = F().arche) {
     if (arche && e.arche !== arche) return false;
     if (f.pal.length && !f.pal.includes(palKey(e))) return false;
     if (f.kind && e.kind !== f.kind) return false;
-    if (f.side && e.side !== f.side) return false;
-    if (f.flags.some((k) => !e[k])) return false;
     return true;
   });
 }
@@ -395,7 +395,7 @@ function renderCatalogue() {
   const order = (e) => (e.palier === "NOMADE" ? 9 : PAL_NUM[e.palier] + (e.palier.startsWith("PR") ? -1 : 0));
   list.sort((a, b) => order(a[0]) - order(b[0]) || a[0].arche.localeCompare(b[0].arche));
   const pal = isSaut ? SAUT[state.level] : palTable()[state.level];
-  const nActive = f.pal.length + !!f.kind + !!f.side + f.flags.length + (state.filter !== "aut");
+  const nActive = f.pal.length + !!f.kind + (state.filter !== "aut");
   const searching = !!qWords(state.q).length;
   const chip = (attr, val, on, label) => `<button type="button" class="fchip" ${attr}="${esc(val)}" aria-pressed="${on}">${label}</button>`;
   const inRoutine = {};
@@ -406,18 +406,17 @@ function renderCatalogue() {
     <div class="seg viewseg" role="group" aria-label="Affichage">${[["arche", "Arche"], ["liste", "Liste"]].map(([k, l]) => `<button type="button" data-catview="${k}" aria-pressed="${curView === k}">${l}</button>`).join("")}</div></header>
   <div class="tools">
     <input class="search" id="q" type="search" placeholder="Cherche : rondade flip salto…" value="${esc(state.q)}" aria-label="Chercher un ou plusieurs mouvements" autocomplete="off">
+    <button type="button" class="fbtn" data-act="ftoggle" aria-expanded="${!!state.fOpen}">Filtres${nActive ? ` <b>${nActive}</b>` : ""}</button>
   </div>
   ${searching ? "" : `<div class="arches" role="group" aria-label="Arche">
     ${arcView ? "" : chip("data-arche-pick", "", !f.arche, "Toutes")}
     ${arches.map((a) => chip("data-arche-pick", a, shown === a, esc(a))).join("")}
   </div>`}
-  <details class="filters" ${state.fOpen || nActive ? "open" : ""}><summary>Filtres${nActive ? ` (${nActive})` : ""}</summary>
-    <div class="frow"><span class="flabel">Montrer</span>${[["val", "Ceux qui rapportent des points"], ["aut", "Ceux de mon niveau"], ["all", "Tous"]].map(([k, l]) => chip("data-filter", k, state.filter === k, l)).join("")}</div>
+  ${state.fOpen ? `<div class="filters">
+    <div class="frow"><span class="flabel">Montrer</span>${[["val", "Qui rapportent des points"], ["aut", "De mon niveau"], ["all", "Tous"]].map(([k, l]) => chip("data-filter", k, state.filter === k, l)).join("")}</div>
     <div class="frow"><span class="flabel">Palier</span>${PAL_KEYS.filter((k) => scope.some((e) => palKey(e) === k)).map((k) => chip("data-fpal", k, f.pal.includes(k), k === "N" ? "Nomade" : k)).join("")}</div>
     ${kinds.length > 1 ? `<div class="frow"><span class="flabel">Type</span>${kinds.map((k) => chip("data-fkind", k, f.kind === k, KIND_LABEL[k])).join("")}</div>` : ""}
-    ${sides.length ? `<div class="frow"><span class="flabel">Sens</span>${sides.map((s) => chip("data-fside", s, f.side === s, esc(s))).join("")}</div>` : ""}
-    ${isSaut ? "" : `<div class="frow"><span class="flabel">Avec</span>${Object.entries(FLAG_LABEL).map(([k, l]) => chip("data-fflag", k, f.flags.includes(k), l)).join("")}</div>`}
-  </details>
+  </div>` : ""}
   ${nActive ? `<div class="results-bar"><button type="button" class="linkbtn" data-act="clearf">effacer les filtres</button></div>` : ""}`;
 
   const card = (e, st) => `<li class="card-el ${st.aut ? "" : "out"}" data-id="${e.id}">
@@ -440,7 +439,7 @@ function renderCatalogue() {
     const groups = searchGroups(state.q, pool.map(([e]) => e));
     for (const g of groups) {
       g.hits.sort((a, b) => b[1] - a[1] || stOf.get(b[0].id).val - stOf.get(a[0].id).val || order(a[0]) - order(b[0]));
-      html += `<section class="sgroup"><h3 class="sg-word">${groups.length > 1 ? `<span class="sg-n">${groups.indexOf(g) + 1}</span>` : ""}« ${esc(g.words.join(" "))} »</h3>`
+      html += `<section class="sgroup"><h3 class="sg-word">${groups.length > 1 ? `<span class="sg-n">${groups.indexOf(g) + 1}</span>` : ""}« ${esc(g.label.join(" "))} »</h3>`
         + (g.hits.length ? `<ul class="cards">${g.hits.map(([e]) => card(e, stOf.get(e.id))).join("")}</ul>` : `<p class="empty">Rien trouvé pour ce mot.${state.filter !== "all" ? ` <button type="button" class="linkbtn" data-filter="all">Chercher aussi hors de mon niveau</button>` : ""}</p>`)
         + `</section>`;
     }
@@ -599,7 +598,7 @@ function reqRow(kind, k, r, extra) {
   const cls = r.ok ? "ok" : r.manual && !r.forced ? "man" : "ko";
   const sym = r.ok ? "✓" : r.manual && !r.forced ? "?" : "✗";
   const hint = r.forced ? "réglé à la main · toucher pour changer" : r.manual ? "à juger : toucher pour valider" : "auto · toucher pour forcer";
-  return `<div class="req ${cls} ${extra?.kept ? "kept" : ""}">
+  return `<div class="req ${cls} ${extra?.kept ? "kept" : ""}" ${extra?.hl?.length ? `data-hl="${extra.hl.join(",")}"` : ""}>
     <button class="st" type="button" data-man="${kind}${k}" title="${hint}" aria-label="${esc(r.t)} : ${hint}">${sym}</button>
     <button type="button" class="req-open" data-req="${kind}${k}" title="Voir le détail"><span>${r.s ? `<span class="star">(*) </span>` : ""}${esc(r.t)}</span>${extra?.why ? `<span class="why">${esc(extra.why)}</span>` : ""}</button>
     <span class="p">${extra?.pts ?? ""}</span></div>`;
@@ -666,7 +665,7 @@ function suggestFor(d, key) {
     pairs.sort((p, q) => pv(p) - pv(q));
     const na = {}, nb = {}, seen = new Set(), keep = [];
     for (const p of pairs) {
-      const ka = short(p.a), kb = short(p.b), kk = ka + ">" + kb; // même nom à deux paliers : une seule proposition
+      const ka = short(p.a), kb = short(p.b), kk = [ka, kb].sort().join(">"); // même nom à deux paliers, ou ordre inverse : une seule proposition
       if (seen.has(kk) || (na[ka] || 0) >= 2 || (nb[kb] || 0) >= 2) continue;
       seen.add(kk); na[ka] = (na[ka] || 0) + 1; nb[kb] = (nb[kb] || 0) + 1; keep.push(p);
       if (keep.length >= 12) break;
@@ -699,12 +698,12 @@ function openReqDetail(key) {
   else if (!sg.list.length && !sg.pairs.length) body = `<p class="muted">${r.ok ? "C'est déjà rempli." : "Pas de proposition simple : il faut plusieurs mouvements ou un changement de barre (voir le barème)."}</p>`;
   else {
     const pairCard = ({ a, b, link }) => `<li class="sg-pair">
-      <button type="button" class="sg-el" data-detail="${a.id}" title="Voir la fiche">${a.img ? `<img src="img/${a.id}.webp" alt="" loading="lazy">` : ""}<span><b>${esc(short(a))}</b></span></button>
+      <button type="button" class="sg-el" data-detail="${a.id}" title="Voir la fiche">${a.img ? `<img src="img/${a.id}.webp" alt="" loading="lazy">` : ""}<span>${palBadge(a, status(a))} <b>${esc(short(a))}</b></span></button>
       <span class="sg-arrow" aria-hidden="true">${link === "direct" ? "↔" : "+"}</span>
-      <button type="button" class="sg-el" data-detail="${b.id}" title="Voir la fiche">${b.img ? `<img src="img/${b.id}.webp" alt="" loading="lazy">` : ""}<span><b>${esc(short(b))}</b></span></button>
+      <button type="button" class="sg-el" data-detail="${b.id}" title="Voir la fiche">${b.img ? `<img src="img/${b.id}.webp" alt="" loading="lazy">` : ""}<span>${palBadge(b, status(b))} <b>${esc(short(b))}</b></span></button>
       <button type="button" class="sg-add" data-padd="${a.id}:${b.id}:${link}" aria-label="Ajouter ${esc(short(a))} puis ${esc(short(b))}">+</button></li>`;
     const lk = sg.pairs.some((p) => p.link === "direct");
-    body = (sg.list.length ? `<p class="muted">${sg.arches ? "Mouvements des arches que tu n'as pas encore." : r.ok ? "C'est rempli. Ces mouvements marcheraient aussi :" : "Un de ces mouvements suffit :"} Touche + pour l'ajouter.</p>`
+    body = (sg.list.length ? `<p class="muted">${sg.arches ? "Mouvements des arches que tu n'as pas encore." : r.ok ? "C'est rempli. Ces mouvements marcheraient aussi :" : "Un de ces mouvements suffit."} Touche + pour l'ajouter.</p>`
       + [...groups].map(([a, xs]) => `<h4>${esc(a)}</h4><ul class="sg-list">${xs.map(card).join("")}</ul>`).join("") : "")
       + (sg.pairs.length ? `<h4 class="sg-pairs-h">${sg.list.length ? "Ou deux" : "Deux"} mouvements ${lk ? "liés (sans pas entre les deux)" : "à ajouter"}</h4>
         <p class="muted">Touche + pour ajouter les deux d'un coup${lk ? ", déjà liés" : ""}.</p><ul class="sg-list">${sg.pairs.map(pairCard).join("")}</ul>` : "");
@@ -734,7 +733,8 @@ function renderNote() {
   </div>
   ${isGAM() ? `<p class="gam-note">${GAM_STATUS[state.app] ? esc(GAM_STATUS[state.app]) + "<br>" : ""}${esc(GAM_NOTE)}</p>` : ""}
   <div class="card req-group"><h3>Tronc commun</h3>
-    ${ev.tc.map((r, k) => reqRow("tc", k, r, { why: brief(r.why) || (r.forced ? "réglé à la main" : ""), pts: r.ok ? "+1" : "0" })).join("")}
+    ${ev.tc.map((r, k) => reqRow("tc", k, r, { why: brief(r.why) || (r.forced ? "réglé à la main" : ""), pts: r.ok ? "+1" : "0",
+      hl: [...new Set([...(r.c?.items || []), ...(r.c?.groups || []).flatMap(([, l]) => l)].map((it) => it.i))] })).join("")}
   </div>
   <div class="card req-group"><h3>Valorisations <span class="pts muted">${ev.vals.length > 4 ? "les 4 meilleures comptent" : ""}</span></h3>
     ${ev.vals.map((v, k) => {
@@ -743,7 +743,7 @@ function renderNote() {
       else if (v.kept) why = v.forced ? "validée à la main" : "";
       else if (v.ok) why = "pas comptée : mouvements déjà utilisés" + (ev.vals.length > 4 ? " ou pas dans les 4 meilleures" : "");
       else if (v.manual && !v.forced) why = "à cocher si elle est faite";
-      return reqRow("v", k, { ...v, ok: v.kept }, { why, pts: v.kept ? "+" + v.pts : v.pts, kept: v.kept });
+      return reqRow("v", k, { ...v, ok: v.kept }, { why, pts: v.kept ? "+" + v.pts : v.pts, kept: v.kept, hl: v.kept ? v.use : v.wit[0] });
     }).join("")}
   </div>
   <details class="card info"><summary>Les règles ${esc(APPS.find((a) => a.id === state.app).label)} ${state.level}</summary><dl>
@@ -912,9 +912,9 @@ function paintSaveState(d) {
   const el = $("#saveState"); if (!el) return;
   const t = d.saved ? new Date(d.saved).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
   const [cls, txt] = !d.saved ? ["draft", "Brouillon · enregistre-le pour le retrouver dans « Mes enchaînements »"]
-    : d._status === "saving" || d._status === "dirty" ? ["busy", "Enregistrement…"]
+    : d._status === "saving" || d._status === "dirty" ? ["busy", "enregistrement…"]
     : d._status === "err" ? ["err", "Impossible d'enregistrer : le navigateur bloque le stockage (navigation privée ?)"]
-    : ["ok", `Enregistré dans ce navigateur à ${t} · sauvegarde automatique`];
+    : ["ok", "enregistré"];
   el.className = "save-state " + cls; el.textContent = txt;
 }
 // Avant de remplacer un brouillon non enregistré qui contient des mouvements, on le met de côté sur le serveur.
@@ -1065,6 +1065,7 @@ document.addEventListener("click", async (e) => {
   else if (ds.fkind) F().kind = F().kind === ds.fkind ? "" : ds.fkind;
   else if (ds.fside) F().side = F().side === ds.fside ? "" : ds.fside;
   else if (ds.fflag) { const a = F().flags; a.includes(ds.fflag) ? a.splice(a.indexOf(ds.fflag), 1) : a.push(ds.fflag); }
+  else if (ds.act === "ftoggle") state.fOpen = !state.fOpen;
   else if (ds.act === "rename") state.renaming = !state.renaming;
   else if (ds.act === "clearf") { Object.assign(F(), { pal: [], kind: "", side: "", flags: [] }); state.q = ""; }
   else if (ds.catview) state.catView = ds.catview;
@@ -1082,7 +1083,8 @@ document.addEventListener("click", async (e) => {
     d.items.push({ id: ds.add, link: "none", bar: prev?.bar || "BI" });
     if ($("#detail").open) $("#detail").close();
     toast(`Ajouté : ${BY_ID[ds.add].name.slice(0, 40)}`);
-    if (isMobile()) { state.view = "routine"; render(); requestAnimationFrame(() => $("#rtList .rt-item:last-child")?.scrollIntoView({ block: "center" })); return; }
+    // téléphone : retour à l'enchaînement, sauf pendant une recherche de plusieurs mouvements (on les ajoute à la suite)
+    if (isMobile() && qWords(state.q).length < 2) { state.view = "routine"; render(); requestAnimationFrame(() => $("#rtList .rt-item:last-child")?.scrollIntoView({ block: "center" })); return; }
   } else if (ds.link) {
     const it = d.items[ds.link], cur = BY_ID[it.id], pv = BY_ID[d.items[ds.link - 1].id];
     const cycle = elApp() === "sol" && cur.kind === "saut" && pv.kind === "saut" ? ["none", "direct", "indirect"] : ["none", "direct"];
@@ -1170,6 +1172,16 @@ function hoverLink(id, fromCatalogue) {
 }
 document.addEventListener("mouseover", (e) => {
   if (document.querySelector(".sortable-drag, .hs-drag")) return; // pas pendant un glisser
+  const rq = e.target.closest?.("#pane-note .req");
+  if (rq) {
+    const key = "req:" + (rq.dataset.hl || "");
+    if (key !== hoverLink.cur) {
+      hoverLink.cur = key; hoverLink(null);
+      const rows = [...document.querySelectorAll("#rtList .rt-item")];
+      (rq.dataset.hl || "").split(",").filter(Boolean).forEach((i) => rows[i]?.classList.add("hl"));
+    }
+    return;
+  }
   const n = e.target.closest?.("#archeCanvas .hs, #cards .card-el, #rtList .rt-item");
   const id = n ? n.dataset.id || n.dataset.eid : null;
   if (id !== hoverLink.cur) { hoverLink.cur = id; hoverLink(id, !!n && !n.classList.contains("rt-item")); }
