@@ -262,7 +262,7 @@ function render() {
   document.body.classList.toggle("on-recap", home);
   document.body.classList.toggle("picking", !home && state.view === "catalogue" && elApp() !== "saut");
   $("#page-recap").hidden = !home;
-  if (home) { $("#ctxbar").innerHTML = ""; renderRecap(); persist(); return; }
+  if (home) { document.body.classList.remove("on-sheet"); $("#page-sheet").hidden = true; $("#ctxbar").innerHTML = ""; renderRecap(); persist(); return; }
   const lvlColor = `var(--${state.level})`;
   document.documentElement.style.setProperty("--lvl", lvlColor);
   document.documentElement.style.setProperty("--app", APPS.find((a) => a.id === state.app).color);
@@ -270,7 +270,12 @@ function render() {
   if (!levelsFor().includes(state.level)) state.level = levelsFor()[0];
   $("#ctxbar").innerHTML = `<span class="ctx-app" style="--c:${app.color}">${app.disc === "GAM" ? "GAM · " : ""}${app.label}</span>
     <label class="ctx-lvl" style="--c:var(--${state.level})"><span class="sr">Niveau</span><select id="ctxLevel" aria-label="Niveau de l'enchaînement">${levelsFor().map((l) => `<option value="${l}" ${l === state.level ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-    <span class="ctx-name">${esc(draft().name || "Sans nom")}</span>`;
+    <span class="ctx-name">${esc(draft().name || "Sans nom")}</span>
+    ${elApp() === "saut" ? "" : `<button type="button" class="ctx-sheet" data-act="sheet" aria-pressed="${!!state.sheet}">${state.sheet ? "✎ Éditeur" : "📋 Fiche"}</button>`}`;
+  const sheet = !!state.sheet && elApp() !== "saut";
+  document.body.classList.toggle("on-sheet", sheet);
+  $("#page-sheet").hidden = !sheet;
+  if (sheet) { renderSheet(); persist(); autosave(); return; }
   document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.id === "pane-" + state.view));
   document.querySelectorAll("#tabbar button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === state.view));
   renderCatalogue();
@@ -456,7 +461,7 @@ function renderCatalogue() {
     html += `<div class="arche-tools"><span class="lg"><i class="k-val"></i>rapporte des points</span><span class="lg"><i class="k-aut"></i>de mon niveau</span>
       <span class="zoom" role="group" aria-label="Zoom"><button type="button" class="mini icon" data-zoom="-1" aria-label="Dézoomer" ${z <= 1 ? "disabled" : ""}>−</button><output>${Math.round(z * 100)} %</output><button type="button" class="mini icon" data-zoom="1" aria-label="Zoomer" ${z >= 2.5 ? "disabled" : ""}>+</button></span></div>
     <div class="arche-wrap"><div class="arche-canvas" id="archeCanvas" style="width:${z * 100}%">
-      ${pg ? `<img src="arches/p${pg}.webp" alt="Arche ${esc(shown)} (brochure p. ${pg + 27})" draggable="false">` : ""}
+      ${pg ? `<img src="arches/${pg}.webp" alt="Arche ${esc(shown)}" draggable="false">` : ""}
       ${items.map((e) => {
         const st = status(e), [, cx, cy, w, h, a] = e.hs;
         const cls = [!match.has(e.id) ? "dim" : st.val ? "val" : st.aut ? "aut" : "out", inRoutine[e.id] ? "inr" : ""].join(" ");
@@ -779,6 +784,129 @@ function renderReqResults() {
     + (list.length ? `<h4 class="sg-pairs-h">${series.length ? "Ou un seul mouvement" : sg.arches ? "Mouvements des arches que tu n'as pas encore" : r.ok ? "C'est rempli. Ces mouvements marcheraient aussi" : "Un de ces mouvements suffit"}</h4><p class="muted">Touche + pour l'ajouter.</p>`
       + [...groups].map(([a, xs]) => `<h4>${esc(a)}</h4><ul class="sg-list">${xs.map(card).join("")}</ul>`).join("") : "");
 }
+
+// ---------- fiche guidée ----------
+// Comme la feuille papier : tronc commun et arches à gauche, valorisations avec des choix tout faits à droite.
+// Les choix sont calculés sur un enchaînement vide (ils ne bougent pas quand on coche) et gardés par agrès + niveau.
+const SHEET = new Map();
+function sheetProps() {
+  const key = `${state.app}:${state.level}`;
+  let entry = SHEET.get(key);
+  if (entry) return entry;
+  entry = { vals: [], done: false }; SHEET.set(key, entry);
+  const d0 = { items: [], manual: {} }, n = (VALOS[state.app]?.[state.level] || []).length;
+  const order = (e) => (e.palier === "NOMADE" ? 9 : PAL_NUM[e.palier]);
+  const step = (k) => {
+    if (k >= n) { entry.done = true; if (state.sheet) renderSheet(); return; }
+    if (`${state.app}:${state.level}` !== key) { SHEET.delete(key); return; } // on a changé d'agrès ou de niveau entre-temps
+    const sg = suggestFor(d0, "v" + k);
+    const series = pickSeries(sg.series || [], d0, "v" + k).slice(0, 3).map((x) => ({ ids: x.els.map((e) => e.id), link: x.link }));
+    const singles = (sg.list || []).map((x) => x.e).filter((e) => status(e).val).sort((a, b) => order(a) - order(b))
+      .filter((e, i, a) => a.findIndex((x) => short(x) === short(e)) === i).slice(0, series.length ? 1 : 4);
+    entry.vals[k] = [...series, ...singles.map((e) => ({ ids: [e.id], link: "none" }))];
+    if (state.sheet && state.page === "edit") renderSheet();
+    setTimeout(() => step(k + 1), 0);
+  };
+  setTimeout(() => step(0), 30);
+  return entry;
+}
+// position d'une suite d'éléments dans l'enchaînement (-1 si absente)
+function blockAt(items, ids) {
+  for (let i = 0; i + ids.length <= items.length; i++) if (ids.every((id, j) => items[i + j].id === id)) return i;
+  return -1;
+}
+function sheetToggle([k, j]) {
+  const opt = sheetProps().vals[k]?.[j]; if (!opt) return;
+  const d = draft(), at = blockAt(d.items, opt.ids), bar = d.items.at(-1)?.bar || "BI";
+  if (at >= 0) { d.items.splice(at, opt.ids.length); if (d.items[0]) d.items[0].link = "none"; toast("Retiré de l'enchaînement"); }
+  else { opt.ids.forEach((id, i) => d.items.push({ id, link: i ? opt.link : "none", bar })); toast(`Ajouté : ${opt.ids.map((id) => short(BY_ID[id])).join(opt.link === "direct" ? " ↔ " : " + ")}`); }
+  render();
+}
+function sheetToggleEl(id) {
+  const d = draft(), at = d.items.map((it) => it.id).lastIndexOf(id);
+  if (at >= 0) { d.items.splice(at, 1); if (d.items[0]) d.items[0].link = "none"; toast("Retiré de l'enchaînement"); }
+  else { d.items.push({ id, link: "none", bar: d.items.at(-1)?.bar || "BI" }); toast(`Ajouté : ${short(BY_ID[id])}`); }
+  render();
+}
+function renderSheet() {
+  const box = $("#page-sheet"); if (!box || !state.sheet) return;
+  const d = draft(), ev = evaluate(d), app = APP(), props = sheetProps();
+  const inR = new Set(d.items.map((it) => it.id)), have = new Set(ev.H.counted.map((it) => it.arche));
+  const cb = (on, part) => `<span class="sh-box ${on ? "on" : part ? "part" : ""}" aria-hidden="true">${on ? "✓" : part ? "~" : ""}</span>`;
+  const pk = (e) => `<i class="pk">${e.palier === "NOMADE" ? "N" : e.palier}</i>`;
+  const archesTc = ev.tc.find((r) => /arches$/.test(r.t));
+  const els = ELS.filter((e) => e.app === elApp() && status(e).aut);
+  const arches = [...new Set(els.map((e) => e.arche))];
+  const PALS = ["PR", "P1", "P2", "P3", "P4", "P5", "P6", "P7", "N"];
+
+  const tcHtml = ev.tc.map((r, k) => `<li><button type="button" class="sh-line" data-req="tc${k}">${cb(r.ok)}<span>${esc(r.t)}</span>${brief(r.why) ? `<small>${esc(brief(r.why))}</small>` : ""}</button></li>`).join("");
+
+  const archHtml = arches.map((a) => {
+    const list = els.filter((e) => e.arche === a);
+    const rows = PALS.map((k) => [k, list.filter((e) => palKey(e) === k)]).filter(([, l]) => l.length).map(([k, l]) => {
+      const seen = new Set();
+      return `<span class="pal-k">${k === "N" ? "Nom." : k}</span>` + l.filter((e) => { const n = short(e); if (seen.has(n) && !inR.has(e.id)) return false; seen.add(n); return true; })
+        .map((e) => `<button type="button" class="sh-el ${inR.has(e.id) ? "on" : ""} ${status(e).val ? "" : "nv"}" data-stog="${e.id}" title="${esc(e.name)}">${esc(short(e))}</button>`).join("");
+    }).join("");
+    return `<div class="sh-arche ${have.has(a) ? "on" : ""}"><div class="ah">${cb(have.has(a))}<b>${esc(a)}</b></div><div class="ap">${rows}</div></div>`;
+  }).join("");
+
+  const valHtml = ev.vals.map((v, k) => {
+    const opts = props.vals[k], manual = v.manual && !v.forced;
+    const optHtml = manual ? `<li class="sh-note">Elle se juge : coche la case quand elle est faite.</li>`
+      : !opts ? `<li class="sh-note rq-wait">Je prépare les choix…</li>`
+      : !opts.length ? `<li class="sh-note">Pas de choix tout fait : touche le titre pour chercher.</li>`
+      : opts.map((o, j) => {
+          const on = blockAt(d.items, o.ids) >= 0, oe = o.ids.map((id) => BY_ID[id]).filter(Boolean);
+          const arcs = [...new Set(oe.map((e) => e.arche))];
+          return `<li><button type="button" class="sh-opt ${on ? "on" : ""}" data-sopt="${k}:${j}">${cb(on)}
+            <span class="sh-chain">${oe.map((e) => `${esc(short(e))} ${pk(e)}`).join(` <b class="lk">${o.link === "direct" ? "↔" : "+"}</b> `)}</span>
+            <span class="sh-arcs">${arcs.map((a) => `<span class="${have.has(a) ? "" : "neu"}">${esc(a)}</span>`).join("")}</span></button></li>`;
+        }).join("");
+    return `<section class="sh-val ${v.kept ? "kept" : v.ok ? "maybe" : ""}">
+      <div class="sh-vhead">${manual ? `<button type="button" class="sh-boxbtn" data-man="v${k}" aria-label="Cocher si elle est faite">${cb(v.kept)}</button>` : cb(v.kept, v.ok && !v.kept)}
+        <button type="button" class="sh-vt" data-req="v${k}" title="Voir plus de choix">${v.s ? `<span class="star">(*)</span> ` : ""}${esc(v.t)}</button>
+        <button type="button" class="linkbtn sh-more" data-req="v${k}">autres…</button><span class="sh-pts">${v.kept ? "+" : ""}${v.pts}</span></div>
+      <ul class="sh-opts">${optHtml}</ul></section>`;
+  }).join("");
+
+  box.innerHTML = `<div class="sheet" id="sheet">
+    <header class="sh-head">
+      <h2>${esc(app.label)} ${state.level}${app.disc === "GAM" ? " <small>GAM</small>" : ""}</h2>
+      <span class="sh-name">${esc(d.name || "")}${d.gym ? " · " + esc(d.gym) : ""}</span>
+      <div class="sh-score"><span>T. commun <b>${ev.tcPts}/${ev.tc.length}</b></span><span>Valorisations <b>${ev.vPts}/${ev.vMax}</b></span><span class="nd">Note de départ <b>${fmt(ev.nd)}/${ev.ndMax}</b></span></div>
+      <div class="sh-actions"><button type="button" class="btn" data-act="print">Imprimer</button><button type="button" class="btn primary" data-act="sheet">✎ Éditeur</button></div>
+    </header>
+    <div class="sh-cols">
+      <div class="sh-left">
+        <h3>Tronc commun</h3><ul class="sh-tc">${tcHtml}</ul>
+        <h3>Valorisations <small>${ev.vals.length > 4 ? "les 4 meilleures comptent · " : ""}(*) = 3 pts, sinon 2 · coche un choix pour l'ajouter</small></h3>
+        ${valHtml || `<p class="muted">Pas de valorisations pour cet agrès.</p>`}
+      </div>
+      <div class="sh-right">
+        ${arches.length ? `<h3>Arches${archesTc ? ` <small>${esc(archesTc.t.replace(/arches$/, "minimum"))} · touche un mouvement pour l'ajouter</small>` : ""}</h3><div class="sh-arches">${archHtml}</div>` : ""}
+      </div>
+    </div>
+  </div>`;
+  fitSheet();
+}
+// la fiche tient sur l'écran (grand écran) : on la réduit juste ce qu'il faut
+function fitSheet(availW, availH) {
+  const el = $("#sheet"); if (!el) return;
+  el.style.zoom = ""; el.style.width = "";
+  if (availW == null) {
+    if (!window.matchMedia("(min-width: 1100px)").matches) return;
+    availW = Math.min(document.documentElement.clientWidth - 32, 1500);
+    availH = window.innerHeight - ($(".top")?.offsetHeight || 0) - 24;
+  }
+  // plus on réduit, plus la fiche est large et donc moins haute : on cherche le plus grand zoom qui tient
+  const fits = (z) => { el.style.width = availW / z + "px"; el.style.zoom = z; return el.scrollHeight * z <= availH + 1; };
+  if (fits(1)) return;
+  let lo = 0.4, hi = 1;
+  for (let i = 0; i < 8; i++) { const m = (lo + hi) / 2; if (fits(m)) lo = m; else hi = m; }
+  fits(lo);
+}
+window.addEventListener("resize", () => { if (state.sheet) fitSheet(); });
 
 // version courte pour le barème : « 2/4 : … » → « 2/4 », « Validé par : X » → « X »
 const brief = (w) => !w ? "" : /^\d+\/\d+/.test(w) ? w.split(" : ")[0] : w.replace(/^Validé par : /, "").replace(/^Aucun mouvement ne remplit cette exigence$/, "");
@@ -1126,6 +1254,10 @@ document.addEventListener("click", async (e) => {
   else if (ds.fkind) F().kind = F().kind === ds.fkind ? "" : ds.fkind;
   else if (ds.fside) F().side = F().side === ds.fside ? "" : ds.fside;
   else if (ds.fflag) { const a = F().flags; a.includes(ds.fflag) ? a.splice(a.indexOf(ds.fflag), 1) : a.push(ds.fflag); }
+  else if (ds.act === "sheet") { state.sheet = !state.sheet; window.scrollTo({ top: 0 }); }
+  else if (ds.act === "print") { window.print(); return; }
+  else if (ds.sopt) { sheetToggle(ds.sopt.split(":").map(Number)); return; }
+  else if (ds.stog) { sheetToggleEl(ds.stog); return; }
   else if (ds.act === "ftoggle") state.fOpen = !state.fOpen;
   else if (ds.act === "rename") state.renaming = !state.renaming;
   else if (ds.act === "clearf") { Object.assign(F(), { pal: [], kind: "", side: "", flags: [] }); state.q = ""; }
@@ -1287,4 +1419,7 @@ window.addEventListener("hashchange", () => {
   state.page = location.hash === "#edit" && !hc && state.drafts[draftKey()] ? "edit" : "home"; SAVED = null; render();
   if (hc) openImport(hc[1]);
 });
+// impression de la fiche : toutes les arches dépliées
+window.addEventListener("beforeprint", () => fitSheet(1060, 728)); // A4 paysage, marges 8 mm (96 px/pouce)
+window.addEventListener("afterprint", () => state.sheet && fitSheet());
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

@@ -113,7 +113,7 @@ class Handler(SimpleHTTPRequestHandler):
         return self._json(200 if existed else 404, {"deleted": existed})
 
     def log_message(self, fmt, *args):
-        if "/api/" in (args[0] if args else ""):
+        if args and "/api/" in str(args[0]):
             super().log_message(fmt, *args)
 
 
