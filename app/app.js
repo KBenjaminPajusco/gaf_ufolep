@@ -890,23 +890,25 @@ function renderSheet() {
   </div>`;
   fitSheet();
 }
-// la fiche tient sur l'écran (grand écran) : on la réduit juste ce qu'il faut
-function fitSheet(availW, availH) {
-  const el = $("#sheet"); if (!el) return;
-  el.style.zoom = ""; el.style.width = "";
-  if (availW == null) {
-    if (!window.matchMedia("(min-width: 1100px)").matches) return;
-    availW = Math.min(document.documentElement.clientWidth - 32, 1500);
-    availH = window.innerHeight - ($(".top")?.offsetHeight || 0) - 24;
-  }
-  // plus on réduit, plus la fiche est large et donc moins haute : on cherche le plus grand zoom qui tient
-  const fits = (z) => { el.style.width = availW / z + "px"; el.style.zoom = z; return el.scrollHeight * z <= availH + 1; };
-  if (fits(1)) return;
-  let lo = 0.4, hi = 1;
-  for (let i = 0; i < 8; i++) { const m = (lo + hi) / 2; if (fits(m)) lo = m; else hi = m; }
-  fits(lo);
+// plus grand zoom pour que la fiche tienne dans w × h (plus on réduit, plus elle est large donc moins haute)
+function measureFit(el, w, h) {
+  const fits = (z) => { el.style.width = w / z + "px"; el.style.zoom = z; return el.scrollHeight * z <= h + 1; };
+  let z = 1;
+  if (!fits(1)) { let lo = 0.3, hi = 1; for (let i = 0; i < 9; i++) { const m = (lo + hi) / 2; if (fits(m)) lo = m; else hi = m; } z = lo; }
+  return { z, w: w / z };
 }
-window.addEventListener("resize", () => { if (state.sheet) fitSheet(); });
+// la fiche tient sur l'écran (grand écran) et sur une page A4 paysage (marges 8 mm : 1062 × 733 px à 96 px/pouce)
+function fitSheet() {
+  const el = $("#sheet"); if (!el) return;
+  el.classList.add("measuring-print");
+  const pr = measureFit(el, 1040, 705);
+  el.classList.remove("measuring-print");
+  el.style.setProperty("--pz", pr.z); el.style.setProperty("--pw", pr.w + "px");
+  el.style.zoom = ""; el.style.width = "";
+  if (!window.matchMedia("(min-width: 1100px)").matches) return;
+  measureFit(el, Math.min(document.documentElement.clientWidth - 32, 1500), window.innerHeight - ($(".top")?.offsetHeight || 0) - 24);
+}
+window.addEventListener("resize", () => { if (state.sheet && !window.matchMedia("print").matches) fitSheet(); });
 
 // version courte pour le barème : « 2/4 : … » → « 2/4 », « Validé par : X » → « X »
 const brief = (w) => !w ? "" : /^\d+\/\d+/.test(w) ? w.split(" : ")[0] : w.replace(/^Validé par : /, "").replace(/^Aucun mouvement ne remplit cette exigence$/, "");
@@ -1420,6 +1422,5 @@ window.addEventListener("hashchange", () => {
   if (hc) openImport(hc[1]);
 });
 // impression de la fiche : toutes les arches dépliées
-window.addEventListener("beforeprint", () => fitSheet(1060, 728)); // A4 paysage, marges 8 mm (96 px/pouce)
-window.addEventListener("afterprint", () => state.sheet && fitSheet());
+
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

@@ -7,3 +7,4 @@ tools/*.png
 tools/raw.txt
 tools/rules.txt
 tools/capsules.txt
+tools/*.pdf
