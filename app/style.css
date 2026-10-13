@@ -599,3 +599,25 @@ dialog#detail { overflow-y: auto; overscroll-behavior: contain; }
 button.sg-add { border: 0; width: 40px; height: 40px; cursor: pointer; font-size: 22px; }
 button.sg-add:hover, button.sg-add:focus-visible { filter: brightness(1.1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--app) 30%, transparent); }
 
+
+/* --- version simplifiée (public jeune) --- */
+body:not(.on-recap) .brand .sub { display: none; }
+#pane-routine > header .save-state { margin-right: auto; }
+.rt-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+details.info > summary { cursor: pointer; font-weight: 600; color: var(--muted); }
+details.info[open] > summary { margin-bottom: 10px; color: var(--ink); }
+details.vid-add { margin-top: 8px; }
+details.vid-add > summary { cursor: pointer; font-size: 14px; color: var(--muted); }
+details.vid-add .vrow { margin-top: 8px; }
+/* recherche : un bloc par mouvement cherché */
+.sgroup { margin: 4px 0 18px; }
+.sg-word { display: flex; align-items: center; gap: 8px; font-size: 17px; margin: 0 0 8px; text-transform: none; }
+.sg-n { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--app); color: #fff; font-size: 13px; }
+/* suggestions par paires (liaisons) */
+.sg-pairs-h { margin-top: 14px; }
+.sg-pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.sg-pair .sg-el { grid-template-columns: auto minmax(0, 1fr); gap: 6px; padding: 5px 6px; }
+.sg-pair .sg-el img { width: 48px; height: 32px; }
+.sg-pair .sg-el b { font-size: 13px; }
+.sg-arrow { font-weight: 700; color: var(--app); }
+@media (max-width: 520px) { .sg-pair .sg-el img { display: none; } }

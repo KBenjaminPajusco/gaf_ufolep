@@ -284,8 +284,84 @@ const PAL_KEYS = ["PR", "P1", "P2", "P3", "P4", "P5", "P6", "P7", "N"];
 const palKey = (e) => (e.palier === "NOMADE" ? "N" : e.palier.startsWith("PR") ? "PR" : e.palier);
 const F = () => (state.f ||= { arche: "", pal: [], kind: "", side: "", flags: [] });
 
+// ---------- recherche : mot par mot, tolérante aux fautes ----------
+// « rondade flip salto » = 3 mouvements : chaque mot (ou groupe de mots qui décrit un même mouvement,
+// ex. « salto arrière ») donne sa propre liste de résultats.
+const STOP = new Set("a au aux de des du d en et l la le les ou par sur un une avec".split(" "));
+const SYNO = { flip: "flic", flips: "flic", flic: "flic", poirier: "atr", poiriers: "atr", equilibre: "atr", tictac: "tic", tic: "tic", flack: "flac" };
+const norm = (s) => String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9/]+/g, " ").trim();
+// clé « phonétique » simple : un enfant écrit comme il entend (salteau, rondad, souplaisse…)
+const phon = (w) => w.replace(/eaux?|aux?/g, "o").replace(/ph/g, "f").replace(/qu|c(?=[aou])|ck/g, "k").replace(/ai|ei|e(?=[sz]s?$)/g, "e").replace(/(.)\1+/g, "$1").replace(/[stex]$/, "") || w;
+function lev(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i]; let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) cur[j] = Math.min(cur[j], prev[j - 2] + 1);
+      best = Math.min(best, cur[j]);
+    }
+    if (best > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+const qWords = (q) => norm(q).split(" ").filter((w) => w && !STOP.has(w)).map((w) => SYNO[w] || w);
+const tokIndex = new Map(); // id → { head: mots du nom court, all: tous les mots }
+function toks(e) {
+  let t = tokIndex.get(e.id);
+  if (!t) {
+    const head = norm(e.name.split(/\. |\(|:|,/)[0]).split(" ").filter((w) => w && !STOP.has(w)).slice(0, 5);
+    const all = [...new Set([...norm(`${e.name} ${e.arche} ${e.side || ""}`).split(" "), ...head])].filter(Boolean);
+    t = { head: new Set(head), all, ph: all.map(phon), num: String(e.num).toLowerCase() };
+    tokIndex.set(e.id, t);
+  }
+  return t;
+}
+// score d'un mot de la recherche sur un mouvement (0 = absent) ; + 2 quand le mot est dans le nom court
+const WS = new Map();
+function wordScore(w, e) {
+  const key = w + "|" + e.id; let s = WS.get(key);
+  if (s === undefined) { s = wordScore0(w, e); if (WS.size > 50000) WS.clear(); WS.set(key, s); }
+  return s;
+}
+function wordScore0(w, e) {
+  const t = toks(e); if (/^\d/.test(w) && t.num === w) return 6;
+  const pw = phon(w), max = w.length >= 7 ? 2 : w.length >= 4 ? 1 : 0;
+  let s = 0;
+  t.all.forEach((tok, k) => {
+    let v = 0;
+    if (tok === w) v = 4;
+    else if (w.length >= 2 && tok.startsWith(w)) v = 3;
+    else if (t.ph[k] === pw && pw.length >= 3) v = 2.5;
+    else if (max && lev(w, tok, max) <= max) v = 2;
+    else if (max && tok.length > w.length && lev(w, tok.slice(0, w.length), 1) <= 1 && w.length >= 4) v = 1.5;
+    if (v && t.head.has(tok)) v += 2; // le mot est dans le nom du mouvement, pas seulement dans la description
+    s = Math.max(s, v);
+  });
+  return s;
+}
+// découpe la recherche en groupes : on colle des mots voisins seulement s'ils désignent ensemble un même mouvement
+function searchGroups(q, pool) {
+  const ws = qWords(q), out = [];
+  for (let i = 0; i < ws.length;) {
+    let done = false;
+    for (let n = Math.min(4, ws.length - i); n >= 2 && !done; n--) {
+      const span = ws.slice(i, i + n);
+      // tous les mots dans le nom court du même mouvement (exact, début de mot ou même son)
+      const hits = pool.map((e) => [e, span.map((w) => wordScore(w, e))]).filter(([, ss]) => ss.every((s) => s >= 4.5)).map(([e, ss]) => [e, ss.reduce((a, b) => a + b, 0)]);
+      if (hits.length) { out.push({ words: span, hits }); i += n; done = true; }
+    }
+    if (!done) { const w = ws[i]; out.push({ words: [w], hits: pool.map((e) => [e, wordScore(w, e)]).filter(([, s]) => s > 0) }); i++; }
+  }
+  // dans chaque groupe, les correspondances approximatives s'effacent devant les bonnes
+  for (const g of out) { const best = Math.max(0, ...g.hits.map(([, s]) => s)); g.hits = g.hits.filter(([, s]) => s >= best - 1.5 * g.words.length); }
+  return out;
+}
+
 function catalogueList(arche = F().arche) {
-  const f = F(), q = state.q.trim().toLowerCase();
+  const f = F();
   return ELS.filter((e) => e.app === elApp()).map((e) => [e, status(e)]).filter(([e, st]) => {
     if (state.filter === "val" && !st.val) return false;
     if (state.filter === "aut" && !st.aut) return false;
@@ -294,7 +370,6 @@ function catalogueList(arche = F().arche) {
     if (f.kind && e.kind !== f.kind) return false;
     if (f.side && e.side !== f.side) return false;
     if (f.flags.some((k) => !e[k])) return false;
-    if (q && !`${e.name} ${e.num} ${e.arche} ${e.side || ""}`.toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -320,39 +395,66 @@ function renderCatalogue() {
   const order = (e) => (e.palier === "NOMADE" ? 9 : PAL_NUM[e.palier] + (e.palier.startsWith("PR") ? -1 : 0));
   list.sort((a, b) => order(a[0]) - order(b[0]) || a[0].arche.localeCompare(b[0].arche));
   const pal = isSaut ? SAUT[state.level] : palTable()[state.level];
-  const nActive = f.pal.length + !!f.kind + !!f.side + f.flags.length + !!state.q.trim();
+  const nActive = f.pal.length + !!f.kind + !!f.side + f.flags.length + (state.filter !== "aut");
+  const searching = !!qWords(state.q).length;
   const chip = (attr, val, on, label) => `<button type="button" class="fchip" ${attr}="${esc(val)}" aria-pressed="${on}">${label}</button>`;
   const inRoutine = {};
   if (!isSaut) for (const it of draft().items) inRoutine[it.id] = (inRoutine[it.id] || 0) + 1;
 
   let html = `${isSaut ? "" : `<div class="pick-bar"><button type="button" class="back-arrow" data-view="routine" aria-label="Retour à l'enchaînement">←</button><span>Ajouter un élément</span></div>`}
-  <header><h2 id="h-cat">Mouvements</h2><span class="muted">${state.level} · autorisés ${pal.aut[0] ?? "PR"}–${pal.aut.at(-1) ?? ""} · valorisables ${pal.val[0]}–${pal.val.at(-1)}</span>
+  <header><h2 id="h-cat">Mouvements</h2>
     <div class="seg viewseg" role="group" aria-label="Affichage">${[["arche", "Arche"], ["liste", "Liste"]].map(([k, l]) => `<button type="button" data-catview="${k}" aria-pressed="${curView === k}">${l}</button>`).join("")}</div></header>
-  <div class="arches" role="group" aria-label="Arche">
+  <div class="tools">
+    <input class="search" id="q" type="search" placeholder="Cherche : rondade flip salto…" value="${esc(state.q)}" aria-label="Chercher un ou plusieurs mouvements" autocomplete="off">
+  </div>
+  ${searching ? "" : `<div class="arches" role="group" aria-label="Arche">
     ${arcView ? "" : chip("data-arche-pick", "", !f.arche, "Toutes")}
     ${arches.map((a) => chip("data-arche-pick", a, shown === a, esc(a))).join("")}
-  </div>
-  <div class="tools">
-    <input class="search" id="q" type="search" placeholder="Chercher : salto, rondade, 154…" value="${esc(state.q)}" aria-label="Chercher un mouvement">
-    <div class="seg" role="group" aria-label="Statut">
-      ${[["val", "Valorisables"], ["aut", "Autorisés"], ["all", "Tous"]].map(([k, l]) => `<button type="button" data-filter="${k}" aria-pressed="${state.filter === k}">${l}</button>`).join("")}
-    </div>
-  </div>
+  </div>`}
   <details class="filters" ${state.fOpen || nActive ? "open" : ""}><summary>Filtres${nActive ? ` (${nActive})` : ""}</summary>
+    <div class="frow"><span class="flabel">Montrer</span>${[["val", "Ceux qui rapportent des points"], ["aut", "Ceux de mon niveau"], ["all", "Tous"]].map(([k, l]) => chip("data-filter", k, state.filter === k, l)).join("")}</div>
     <div class="frow"><span class="flabel">Palier</span>${PAL_KEYS.filter((k) => scope.some((e) => palKey(e) === k)).map((k) => chip("data-fpal", k, f.pal.includes(k), k === "N" ? "Nomade" : k)).join("")}</div>
     ${kinds.length > 1 ? `<div class="frow"><span class="flabel">Type</span>${kinds.map((k) => chip("data-fkind", k, f.kind === k, KIND_LABEL[k])).join("")}</div>` : ""}
     ${sides.length ? `<div class="frow"><span class="flabel">Sens</span>${sides.map((s) => chip("data-fside", s, f.side === s, esc(s))).join("")}</div>` : ""}
     ${isSaut ? "" : `<div class="frow"><span class="flabel">Avec</span>${Object.entries(FLAG_LABEL).map(([k, l]) => chip("data-fflag", k, f.flags.includes(k), l)).join("")}</div>`}
   </details>
-  <div class="results-bar">${list.length || !arcView ? "" : `<span class="muted">aucun mouvement ne correspond aux filtres</span>`}${nActive ? `<button type="button" class="linkbtn" data-act="clearf">tout effacer</button>` : ""}
-    <span class="muted hint-drag">${arcView ? `touche un mouvement pour sa fiche${isSaut ? "" : ", glisse-le dans l'enchaînement"}` : isSaut ? "" : "glisse une carte dans l'enchaînement, ou touche +"}</span></div>`;
+  ${nActive ? `<div class="results-bar"><button type="button" class="linkbtn" data-act="clearf">effacer les filtres</button></div>` : ""}`;
+
+  const card = (e, st) => `<li class="card-el ${st.aut ? "" : "out"}" data-id="${e.id}">
+      <button type="button" class="thumb" data-detail="${e.id}" aria-label="Voir ${esc(e.name)}">
+        ${e.img ? `<img src="img/${e.id}.webp" alt="" loading="lazy" draggable="false">` : `<span class="noimg">pas d'image</span>`}
+        ${palBadge(e, st)}${state.media[e.id] ? `<span class="vid" title="vidéo disponible">▶</span>` : ""}${inRoutine[e.id] ? `<span class="cnt" title="déjà dans l'enchaînement">${inRoutine[e.id]}</span>` : ""}
+      </button>
+      <div class="cbody"><div class="nm" data-detail="${e.id}">${esc(short(e))}</div>${isSaut ? `<div class="meta">valeur ${SAUT_VALEUR[e.palier]}</div>` : ""}</div>
+      ${isSaut ? "" : `<button class="add" type="button" data-add="${e.id}" aria-label="Ajouter ${esc(e.name)}">+</button>`}
+    </li>`;
+  const sortable = (sel) => { if (!isSaut && !isMobile() && window.Sortable) document.querySelectorAll(sel).forEach((ul) => Sortable.create(ul, {
+    group: { name: "els", pull: "clone", put: false }, sort: false, animation: 120, forceFallback: true, onStart: dragOn, onEnd: dragOff, fallbackTolerance: 4,
+    filter: ".add", preventOnFilter: false, delay: 180, delayOnTouchOnly: true,
+  })); };
+
+  // recherche : un bloc de résultats par mouvement cherché (« rondade flip salto » = 3 blocs)
+  if (searching) {
+    const pool = catalogueList("");
+    const stOf = new Map(pool.map(([e, st]) => [e.id, st]));
+    const groups = searchGroups(state.q, pool.map(([e]) => e));
+    for (const g of groups) {
+      g.hits.sort((a, b) => b[1] - a[1] || stOf.get(b[0].id).val - stOf.get(a[0].id).val || order(a[0]) - order(b[0]));
+      html += `<section class="sgroup"><h3 class="sg-word">${groups.length > 1 ? `<span class="sg-n">${groups.indexOf(g) + 1}</span>` : ""}« ${esc(g.words.join(" "))} »</h3>`
+        + (g.hits.length ? `<ul class="cards">${g.hits.map(([e]) => card(e, stOf.get(e.id))).join("")}</ul>` : `<p class="empty">Rien trouvé pour ce mot.${state.filter !== "all" ? ` <button type="button" class="linkbtn" data-filter="all">Chercher aussi hors de mon niveau</button>` : ""}</p>`)
+        + `</section>`;
+    }
+    $("#pane-catalogue").innerHTML = html;
+    sortable("#pane-catalogue .cards");
+    return;
+  }
 
   if (arcView) {
     const W = PAGE.w, H = PAGE.h, z = state.zoom || 1;
     const match = new Set(list.map(([e]) => e.id));
     const items = scope.filter((e) => e.hs).sort((a, b) => b.hs[3] * b.hs[4] - a.hs[3] * a.hs[4]);
     const pg = items[0]?.hs[0];
-    html += `<div class="arche-tools"><span class="lg"><i class="k-val"></i>valorisable</span><span class="lg"><i class="k-aut"></i>autorisé</span><span class="lg"><i class="k-out"></i>hors niveau ou filtré</span><span class="lg"><i class="k-in">2</i>dans l'enchaînement</span>
+    html += `<div class="arche-tools"><span class="lg"><i class="k-val"></i>rapporte des points</span><span class="lg"><i class="k-aut"></i>de mon niveau</span>
       <span class="zoom" role="group" aria-label="Zoom"><button type="button" class="mini icon" data-zoom="-1" aria-label="Dézoomer" ${z <= 1 ? "disabled" : ""}>−</button><output>${Math.round(z * 100)} %</output><button type="button" class="mini icon" data-zoom="1" aria-label="Zoomer" ${z >= 2.5 ? "disabled" : ""}>+</button></span></div>
     <div class="arche-wrap"><div class="arche-canvas" id="archeCanvas" style="width:${z * 100}%">
       ${pg ? `<img src="arches/p${pg}.webp" alt="Arche ${esc(shown)} (brochure p. ${pg + 27})" draggable="false">` : ""}
@@ -371,25 +473,10 @@ function renderCatalogue() {
     return;
   }
 
-  if (!list.length) html += `<p class="empty">Aucun mouvement ne correspond. Élargis le statut à « Tous » ou retire un filtre.</p>`;
-  html += `<ul class="cards" id="cards">`;
-  for (const [e, st] of list) {
-    html += `<li class="card-el ${st.aut ? "" : "out"}" data-id="${e.id}">
-      <button type="button" class="thumb" data-detail="${e.id}" aria-label="Voir ${esc(e.name)}">
-        ${e.img ? `<img src="img/${e.id}.webp" alt="" loading="lazy" draggable="false">` : `<span class="noimg">pas d'image</span>`}
-        ${palBadge(e, st)}${state.media[e.id] ? `<span class="vid" title="vidéo disponible">▶</span>` : ""}${inRoutine[e.id] ? `<span class="cnt" title="déjà dans l'enchaînement">${inRoutine[e.id]}</span>` : ""}
-      </button>
-      <div class="cbody"><div class="nm" data-detail="${e.id}">${esc(e.name)}</div>
-        <div class="meta">${esc([f.arche ? "" : e.arche, e.side].filter(Boolean).join(" · "))}${isSaut ? ` · valeur ${SAUT_VALEUR[e.palier]}` : ""}</div></div>
-      ${isSaut ? "" : `<button class="add" type="button" data-add="${e.id}" aria-label="Ajouter ${esc(e.name)}">+</button>`}
-    </li>`;
-  }
-  html += `</ul>`;
+  if (!list.length) html += `<p class="empty">Aucun mouvement ici. Essaie « Tous » dans les filtres.</p>`;
+  html += `<ul class="cards" id="cards">${list.map(([e, st]) => card(e, st)).join("")}</ul>`;
   $("#pane-catalogue").innerHTML = html;
-  if (!isSaut && !isMobile() && window.Sortable) Sortable.create($("#cards"), {
-    group: { name: "els", pull: "clone", put: false }, sort: false, animation: 120, forceFallback: true, onStart: dragOn, onEnd: dragOff, fallbackTolerance: 4,
-    filter: ".add", preventOnFilter: false, delay: 180, delayOnTouchOnly: true,
-  });
+  sortable("#cards");
 }
 
 function ytSearch(e) {
@@ -407,23 +494,22 @@ function renderDetail() {
   if (!e) { if (dlg.open) dlg.close(); return; }
   const st = status(e), m = state.media[e.id];
   const ev = m ? embedUrl(m.url) : null;
-  const statusTxt = st.val ? "Valorisable en " + state.level : st.aut ? "Autorisé en " + state.level + " (ne rapporte pas de valorisation)" : "Hors niveau en " + state.level;
+  const statusTxt = st.val ? "Rapporte des points en " + state.level : st.aut ? "Autorisé en " + state.level + ", ne rapporte pas de points" : "Pas autorisé en " + state.level;
   dlg.innerHTML = `<form method="dialog" class="dlg">
-    <header><div>${palBadge(e, st)} <span class="muted">${esc(e.arche)}${e.side ? " · " + esc(e.side) : ""} · n° ${esc(e.num)}</span></div><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
+    <header><div>${palBadge(e, st)} <span class="muted">${esc(e.arche)}</span></div><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
     ${state.fromReq ? `<button type="button" class="linkbtn" data-req="${state.fromReq}">← Retour au barème</button>` : ""}
     <h3>${esc(e.name)}</h3>
     ${e.img ? `<img class="big" src="img/${e.id}.webp" alt="Pictogramme de la brochure : ${esc(e.name)}">` : ""}
-    <div class="chips"><span class="chip ${st.val ? "okc" : ""}">${statusTxt}</span>${e.new ? `<span class="chip new">nouveau</span>` : ""}${e.maj ? `<span class="chip">modifié 2026</span>` : ""}${Object.entries(FLAG_LABEL).filter(([k]) => e[k]).map(([, l]) => `<span class="chip">${l}</span>`).join("")}<span class="chip">brochure p. ${e.page}</span></div>
+    <div class="chips"><span class="chip ${st.val ? "okc" : ""}">${statusTxt}</span></div>
     <section class="video">
-      <h4>Vidéo</h4>
       ${ev ? ev.kind === "yt" ? `<div class="frame"><iframe src="${ev.src}" title="Vidéo ${esc(e.name)}" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe></div>`
-        : ev.kind === "video" ? `<video src="${esc(ev.src)}" controls playsinline preload="metadata"></video>` : `<p><a href="${esc(ev.src)}" target="_blank" rel="noopener">Ouvrir la vidéo</a></p>` : `<p class="muted">Pas encore de vidéo pour ce mouvement.</p>`}
-      <div class="vrow">
+        : ev.kind === "video" ? `<video src="${esc(ev.src)}" controls playsinline preload="metadata"></video>` : `<p><a href="${esc(ev.src)}" target="_blank" rel="noopener">Ouvrir la vidéo</a></p>` : ""}
+      <a class="btn yt" href="${ytSearch(e)}" target="_blank" rel="noopener">Voir des vidéos sur YouTube ↗</a>
+      <details class="vid-add"><summary>${m ? "Changer ma vidéo" : "Ajouter ma vidéo"}</summary><div class="vrow">
         <input id="vidUrl" type="url" placeholder="Coller un lien YouTube ou .mp4" value="${esc(m?.url || "")}" aria-label="Lien de la vidéo">
-        <button class="btn" type="button" data-act="savevid">${m ? "Remplacer" : "Enregistrer"}</button>
+        <button class="btn" type="button" data-act="savevid">Enregistrer</button>
         ${m ? `<button class="btn danger" type="button" data-act="delvid">Retirer</button>` : ""}
-      </div>
-      <a class="btn yt" href="${ytSearch(e)}" target="_blank" rel="noopener">Chercher sur YouTube ↗</a>
+      </div></details>
     </section>
     ${e.app === "saut" ? "" : state.detailPos != null && draft().items[state.detailPos]?.id === e.id
       ? `<div class="pos-row"><span>Élément n° ${state.detailPos + 1} de l'enchaînement</span><button class="btn danger" type="button" data-delpos="${state.detailPos}">Retirer de l'enchaînement</button></div>
@@ -447,34 +533,30 @@ function seriesLabels(H, app) {
 function renderRoutine() {
   const d = draft(), ev = evaluate(d), H = ev.H;
   const lab = seriesLabels(H, elApp());
-  let html = `<header><h2 id="h-rout">Enchaînement</h2><span class="muted">${state.level} · ${esc(APPS.find((a) => a.id === state.app).label)}</span></header><div class="stack">
+  let html = `<header><h2 id="h-rout">Enchaînement</h2><div id="saveState" class="save-state"></div>
+    <span class="rt-actions"><button class="mini" type="button" data-act="rename" aria-pressed="${!!state.renaming}">✎ Nom</button><button class="mini" type="button" data-act="share">Partager</button></span></header><div class="stack">
   <div class="card stack">
-    <div class="rt-head">
+    ${state.renaming ? `<div class="rt-head">
       <input id="rtName" type="text" placeholder="Nom (ex. Régional 2027)" value="${esc(d.name)}" aria-label="Nom de l'enchaînement">
       <input id="rtGym" type="text" placeholder="Gymnaste" value="${esc(d.gym || "")}" aria-label="Gymnaste" list="gymList">
-      <button class="btn" type="button" data-act="share">Partager</button>
-      <button class="btn" type="button" data-act="create">Nouveau</button>
     </div>
-    <datalist id="gymList">${[...new Set((SAVED || []).map((r) => r.gym).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join("")}</datalist>
-    <div id="saveState" class="save-state"></div>`;
+    <datalist id="gymList">${[...new Set((SAVED || []).map((r) => r.gym).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join("")}</datalist>` : ""}`;
   const noCat = !ELS.some((e) => e.app === elApp());
   if (noCat) html += `<p class="empty">${esc(GAM_STATUS[state.app] || "")}</p>`;
   html += `<ol class="rt-list" id="rtList" ${noCat ? "hidden" : ""}>`;
-  if (!d.items.length) html += `<li class="empty ph">${isMobile() ? "Touche <b>+ Ajouter un élément</b> pour choisir ton premier mouvement.<br>Ils s'affichent ici dans l'ordre de passage." : "Glisse des mouvements ici, ou touche + dans le catalogue.<br>Ils s'affichent dans l'ordre de passage ; glisse-les pour changer l'ordre."}<br><br>${EXAMPLES[state.app]?.level === state.level ? `<button class="btn" type="button" data-act="example">Remplir avec l'exemple ${EXAMPLES[state.app]?.label}</button>` : ""}</li>`;
+  if (!d.items.length) html += `<li class="empty ph">${isMobile() ? "Touche <b>+ Ajouter un élément</b> pour choisir ton premier mouvement." : "Glisse des mouvements ici, ou touche + dans le catalogue."}<br><br>${EXAMPLES[state.app]?.level === state.level ? `<button class="btn" type="button" data-act="example">Remplir avec l'exemple ${EXAMPLES[state.app]?.label}</button>` : ""}</li>`;
   else {
     H.items.forEach((it, k) => {
       const st = { aut: it.aut, val: it.val };
       const canIndirect = elApp() === "sol" && it.kind === "saut" && H.items[k - 1]?.kind === "saut";
-      const linkTxt = it.link === "direct" ? "lié" : it.link === "indirect" ? "lié par pas" : "non lié";
+      const linkTxt = it.link === "direct" ? "lié" : it.link === "indirect" ? "lié par pas" : "lier";
       html += `<li class="rt-item ${it.aut ? "" : "bad"} ${it.link !== "none" ? "linked" : ""}" data-eid="${it.id}">
         <span class="idx" title="glisser pour déplacer">${k + 1}</span><button type="button" class="rt-open" data-detail="${it.id}" data-pos="${k}" aria-label="Voir la fiche : ${esc(it.name)}">${it.img ? `<img class="rt-thumb" src="img/${it.id}.webp" alt="" draggable="false">` : palBadge(it, st)}</button>
-        <div><div class="nm" data-detail="${it.id}" data-pos="${k}" title="Voir la fiche">${it.img ? palBadge(it, st) + " " : ""}${esc(it.name)} ${lab[k] ? `<span class="series-tag">${lab[k]}</span>` : ""}</div><div class="meta muted">${esc([it.arche, it.side].filter(Boolean).join(" · "))}${it.sortie ? " · sortie" : ""}</div></div>
+        <div><div class="nm" data-detail="${it.id}" data-pos="${k}" title="Voir la fiche">${it.img ? palBadge(it, st) + " " : ""}${esc(short(it))} ${lab[k] ? `<span class="series-tag">${lab[k]}</span>` : ""}</div></div>
         <div class="ctrl">
           ${k > 0 && !(state.app === "poutre" && it.mousse !== H.items[k - 1].mousse) ? `<button class="mini" type="button" data-link="${k}" aria-pressed="${it.link !== "none"}" title="Liaison avec l'élément précédent${canIndirect ? " (directe ou par pas : PG)" : ""}">↔ ${linkTxt}</button>` : ""}
           ${state.app === "barres" ? `<button class="mini" type="button" data-bar="${k}" aria-pressed="${it.bar === "BS"}">${it.bar}</button>` : ""}
           ${it.mousse ? `<span class="beam-tag">poutre mousse</span>` : ""}
-          <button class="mini icon" type="button" data-move="${k}:-1" aria-label="Monter" ${k === 0 ? "disabled" : ""}>↑</button>
-          <button class="mini icon" type="button" data-move="${k}:1" aria-label="Descendre" ${k === H.items.length - 1 ? "disabled" : ""}>↓</button>
           <button class="mini icon" type="button" data-del="${k}" aria-label="Retirer">×</button>
         </div></li>`;
     });
@@ -482,7 +564,7 @@ function renderRoutine() {
   html += `</ol></div>
   ${noCat ? "" : `<button class="add-fab" type="button" data-view="catalogue">+ Ajouter un élément</button>`}`;
   if (ev.warns.length) html += `<ul class="warn-list">${ev.warns.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>`;
-  html += `<button class="btn wide" type="button" data-page="home">← Tous mes enchaînements${SAVED?.length ? ` (${SAVED.length})` : ""} →</button></div>`;
+  html += `</div>`;
   $("#pane-routine").innerHTML = html;
   $("#tabCount").textContent = d.items.length || "";
   initRoutineDnD(d);
@@ -530,28 +612,73 @@ function reqRowOf(ev, key) {
   const isTc = key.startsWith("tc"), k = Number(key.replace(/\D/g, ""));
   return isTc ? ev.tc[k] : ev.vals[k];
 }
+// évaluation rapide d'une seule exigence (pour tester des centaines d'ajouts possibles)
+function reqEval(d, key, level = state.level, app = state.app) {
+  const H = buildCtx(d, level, app), k = Number(key.replace(/\D/g, ""));
+  if (key.startsWith("tc")) {
+    const [, c] = TC[app][level](H)[k];
+    const obj = c && typeof c === "object" ? c : { ok: !!c, items: [] };
+    return { ok: obj.ok, uses: (i) => (obj.items || []).some((it) => it.i === i), n: obj.items?.length || 0 };
+  }
+  const res = VALOS[app][level][k].f(H) || [], wit = Array.isArray(res) ? res : [];
+  return { ok: wit.length > 0, uses: (i) => wit.some((w) => w.includes(i)), usesAll: (is) => wit.some((w) => is.every((i) => w.includes(i))) };
+}
 function suggestFor(d, key) {
   const ev = evaluate(d), r = reqRowOf(ev, key), isTc = key.startsWith("tc");
-  if (!r || r.manual) return { r, list: [] };
+  if (!r || r.manual) return { r, list: [], pairs: [] };
   const cands = ELS.filter((e) => e.app === elApp() && status(e).aut);
   // « 4 arches » : uniquement les éléments des arches absentes de l'enchaînement
   if (isTc && /arches$/.test(r.t)) {
     const have = new Set(ev.H.counted.map((it) => it.arche));
-    return { r, list: cands.filter((e) => !have.has(e.arche)).map((e) => ({ e, link: "none" })), arches: true };
+    return { r, list: cands.filter((e) => !have.has(e.arche)).map((e) => ({ e, link: "none" })), pairs: [], arches: true };
   }
-  if (isTc && /éléments$/.test(r.t)) return { r, list: [], info: "Ajoute des mouvements différents depuis le catalogue jusqu'à atteindre le nombre demandé." };
-  const n = d.items.length, last = d.items.at(-1);
-  const score = (row) => (isTc ? (row.ok ? 1000 : 0) + (row.c?.items?.length || 0) : (row.ok ? 1 : 0));
-  const base = score(r), out = [];
+  if (isTc && /éléments$/.test(r.t)) return { r, list: [], pairs: [], info: "Ajoute des mouvements différents depuis le catalogue jusqu'à atteindre le nombre demandé." };
+  const n = d.items.length, last = d.items.at(-1), bar = last?.bar || "BI";
+  const base = reqEval(d, key);
+  const better = (x) => (isTc ? x.ok && !base.ok || (!base.ok && x.n > base.n) : x.ok && !base.ok);
+  const out = [], single = new Set();
+  // 1) un seul mouvement ajouté en fin d'enchaînement (non lié, puis lié au précédent)
   for (const e of cands) {
     for (const link of n ? ["none", "direct"] : ["none"]) {
-      const test = { ...d, items: [...d.items, { id: e.id, link, bar: last?.bar || "BI" }] };
-      const r2 = reqRowOf(evaluate(test), key);
-      const uses = isTc ? (r2.c?.items || []).some((it) => it.i === n) : r2.wit.some((w) => w.includes(n));
-      if (uses && (score(r2) > base || r.ok)) { out.push({ e, link }); break; }
+      const x = reqEval({ ...d, items: [...d.items, { id: e.id, link, bar }] }, key);
+      if (x.uses(n) && (better(x) || base.ok)) { out.push({ e, link }); single.add(e.id); break; }
     }
   }
-  return { r, list: out };
+  // 2) exigence pas encore remplie : deux mouvements liés entre eux (LA, LAE, PG, 2 salti…)
+  const pairs = [];
+  if (!base.ok) {
+    const pc = cands.filter((e) => e.palier !== "NOMADE");
+    for (const a of pc) {
+      if (single.has(a.id)) continue;
+      for (const b of pc) {
+        if (single.has(b.id)) continue;
+        const x = reqEval({ ...d, items: [...d.items, { id: a.id, link: "none", bar }, { id: b.id, link: "direct", bar }] }, key);
+        if (x.ok && (x.usesAll ? x.usesAll([n, n + 1]) : x.uses(n) && x.uses(n + 1))) pairs.push({ a, b });
+      }
+    }
+    // les plus simples d'abord, variés (pas toujours le même mouvement), deux mouvements différents de préférence
+    // + des enchaînements qui se font vraiment : même sens de rotation, rondade en premier (elle part vers l'arrière),
+    // salto plutôt en dernier, pas d'élément tenu au milieu d'une liaison
+    const back = (e) => ARRIERE.includes(e.side), rond = (e) => /^rondade/i.test(e.name), held = (e) => /tenu|tenue|maintien/i.test(e.name);
+    const pv = (p) => PAL_NUM[p.a.palier] + PAL_NUM[p.b.palier] + (p.a.id === p.b.id ? 20 : 0)
+      + (p.a.side && p.a.side === p.b.side ? -3 : 0) + (rond(p.a) && back(p.b) ? -6 : 0) + (rond(p.b) ? 4 : 0)
+      + (p.a.salto ? 3 : 0) + (held(p.a) || held(p.b) ? 4 : 0);
+    pairs.sort((p, q) => pv(p) - pv(q));
+    const na = {}, nb = {}, seen = new Set(), keep = [];
+    for (const p of pairs) {
+      const ka = short(p.a), kb = short(p.b), kk = ka + ">" + kb; // même nom à deux paliers : une seule proposition
+      if (seen.has(kk) || (na[ka] || 0) >= 2 || (nb[kb] || 0) >= 2) continue;
+      seen.add(kk); na[ka] = (na[ka] || 0) + 1; nb[kb] = (nb[kb] || 0) + 1; keep.push(p);
+      if (keep.length >= 12) break;
+    }
+    // la liaison est-elle nécessaire ? (« 2 acros de sens différents » n'en demande pas)
+    for (const p of keep) {
+      const x = reqEval({ ...d, items: [...d.items, { id: p.a.id, link: "none", bar }, { id: p.b.id, link: "none", bar }] }, key);
+      p.link = x.ok ? "none" : "direct";
+    }
+    return { r, list: out, pairs: keep };
+  }
+  return { r, list: out, pairs };
 }
 function openReqDetail(key) {
   const d = draft(), ev = evaluate(d);
@@ -569,9 +696,19 @@ function openReqDetail(key) {
   let body;
   if (r.manual && !r.forced) body = `<p class="muted">L'appli ne peut pas vérifier cette exigence seule. Touche le rond à gauche de la ligne dans le barème pour la cocher si elle est réalisée.</p>`;
   else if (sg.info) body = `<p class="muted">${esc(sg.info)}</p>`;
-  else if (!sg.list.length) body = `<p class="muted">${r.ok ? "C'est déjà rempli, et aucun autre mouvement du catalogue n'y contribuerait." : "Aucun mouvement ajouté seul en fin d'enchaînement ne remplit ce critère : il faut sans doute une liaison ou plusieurs éléments (voir le barème)."}</p>`;
-  else body = `<p class="muted">${sg.arches ? "Éléments des arches que tu n'as pas encore dans l'enchaînement." : r.ok ? "C'est rempli. Autres mouvements qui conviendraient :" : "Mouvements qui rempliraient ce critère s'ils sont ajoutés en fin d'enchaînement."} Touche un mouvement pour l'ajouter.</p>`
-    + [...groups].map(([a, xs]) => `<h4>${esc(a)}</h4><ul class="sg-list">${xs.map(card).join("")}</ul>`).join("");
+  else if (!sg.list.length && !sg.pairs.length) body = `<p class="muted">${r.ok ? "C'est déjà rempli." : "Pas de proposition simple : il faut plusieurs mouvements ou un changement de barre (voir le barème)."}</p>`;
+  else {
+    const pairCard = ({ a, b, link }) => `<li class="sg-pair">
+      <button type="button" class="sg-el" data-detail="${a.id}" title="Voir la fiche">${a.img ? `<img src="img/${a.id}.webp" alt="" loading="lazy">` : ""}<span><b>${esc(short(a))}</b></span></button>
+      <span class="sg-arrow" aria-hidden="true">${link === "direct" ? "↔" : "+"}</span>
+      <button type="button" class="sg-el" data-detail="${b.id}" title="Voir la fiche">${b.img ? `<img src="img/${b.id}.webp" alt="" loading="lazy">` : ""}<span><b>${esc(short(b))}</b></span></button>
+      <button type="button" class="sg-add" data-padd="${a.id}:${b.id}:${link}" aria-label="Ajouter ${esc(short(a))} puis ${esc(short(b))}">+</button></li>`;
+    const lk = sg.pairs.some((p) => p.link === "direct");
+    body = (sg.list.length ? `<p class="muted">${sg.arches ? "Mouvements des arches que tu n'as pas encore." : r.ok ? "C'est rempli. Ces mouvements marcheraient aussi :" : "Un de ces mouvements suffit :"} Touche + pour l'ajouter.</p>`
+      + [...groups].map(([a, xs]) => `<h4>${esc(a)}</h4><ul class="sg-list">${xs.map(card).join("")}</ul>`).join("") : "")
+      + (sg.pairs.length ? `<h4 class="sg-pairs-h">${sg.list.length ? "Ou deux" : "Deux"} mouvements ${lk ? "liés (sans pas entre les deux)" : "à ajouter"}</h4>
+        <p class="muted">Touche + pour ajouter les deux d'un coup${lk ? ", déjà liés" : ""}.</p><ul class="sg-list">${sg.pairs.map(pairCard).join("")}</ul>` : "");
+  }
   const dlg = $("#detail");
   dlg.innerHTML = `<form method="dialog" class="dlg">
     <header><span class="muted">${isTc ? "Tronc commun" : "Valorisation" + (r.s ? " principale (*)" : "")}</span><button class="mini icon" value="close" aria-label="Fermer">×</button></header>
@@ -583,6 +720,8 @@ function openReqDetail(key) {
   if (!dlg.open) dlg.showModal();
 }
 
+// version courte pour le barème : « 2/4 : … » → « 2/4 », « Validé par : X » → « X »
+const brief = (w) => !w ? "" : /^\d+\/\d+/.test(w) ? w.split(" : ")[0] : w.replace(/^Validé par : /, "").replace(/^Aucun mouvement ne remplit cette exigence$/, "");
 function renderNote() {
   const d = draft(), ev = evaluate(d), H = ev.H;
   const names = (w) => (w || []).map((i) => H.items[i] && short(H.items[i])).filter(Boolean).join(" + ");
@@ -594,21 +733,21 @@ function renderNote() {
     <div class="final"><span>Note de départ</span><b>${fmt(ev.nd)}<small>/${ev.ndMax}</small></b></div>
   </div>
   ${isGAM() ? `<p class="gam-note">${GAM_STATUS[state.app] ? esc(GAM_STATUS[state.app]) + "<br>" : ""}${esc(GAM_NOTE)}</p>` : ""}
-  <div class="card req-group"><h3>Tronc commun <span class="pts muted">1 pt par exigence</span></h3>
-    ${ev.tc.map((r, k) => reqRow("tc", k, r, { why: r.why || (r.forced ? "réglé à la main" : ""), pts: r.ok ? "+1" : "0" })).join("")}
+  <div class="card req-group"><h3>Tronc commun</h3>
+    ${ev.tc.map((r, k) => reqRow("tc", k, r, { why: brief(r.why) || (r.forced ? "réglé à la main" : ""), pts: r.ok ? "+1" : "0" })).join("")}
   </div>
-  <div class="card req-group"><h3>Valorisations <span class="pts muted">${ev.vals.length > 4 ? `4 retenues parmi ${ev.vals.length} · ` : ""}(*) = 3 pts, sinon 2</span></h3>
+  <div class="card req-group"><h3>Valorisations <span class="pts muted">${ev.vals.length > 4 ? "les 4 meilleures comptent" : ""}</span></h3>
     ${ev.vals.map((v, k) => {
       let why = "";
-      if (v.kept && v.use?.length) why = "Validée par : " + names(v.use);
-      else if (v.kept) why = v.forced ? "Validée à la main" : "";
-      else if (v.ok) why = (v.wit[0]?.length ? `Possible avec : ${names(v.wit[0])} · ` : "") + (ev.vals.length > 4 ? "pas retenue (les 4 meilleures comptent, ou éléments déjà utilisés)" : "éléments déjà utilisés par une autre valorisation");
-      else if (v.manual && !v.forced) why = "Demande un jugement : coche-la si elle est réalisée";
+      if (v.kept && v.use?.length) why = names(v.use);
+      else if (v.kept) why = v.forced ? "validée à la main" : "";
+      else if (v.ok) why = "pas comptée : mouvements déjà utilisés" + (ev.vals.length > 4 ? " ou pas dans les 4 meilleures" : "");
+      else if (v.manual && !v.forced) why = "à cocher si elle est faite";
       return reqRow("v", k, { ...v, ok: v.kept }, { why, pts: v.kept ? "+" + v.pts : v.pts, kept: v.kept });
     }).join("")}
-    <p class="note-foot">Une valorisation ne peut pas contenir d'élément nomade et doit utiliser des éléments distincts des autres valorisations${elApp() === "sol" ? " (sauf « 2 acros de sens différents »)" : ""}. Elle est validée même avec une chute.</p>
   </div>
-  <div class="card info"><h3 style="font-size:18px;text-transform:uppercase;margin-bottom:8px">Rappels ${esc(APPS.find((a) => a.id === state.app).label)} ${state.level}</h3><dl>
+  <details class="card info"><summary>Les règles ${esc(APPS.find((a) => a.id === state.app).label)} ${state.level}</summary><dl>
+    <dt>Valorisations</dt><dd>(*) = 3 pts, sinon 2. Pas d'élément nomade ; chaque valorisation utilise des éléments différents des autres${elApp() === "sol" ? " (sauf « 2 acros de sens différents »)" : ""}. Validée même avec une chute.</dd>
     <dt>Paliers autorisés</dt><dd>${palTable()[state.level].aut.join(", ")}</dd>
     <dt>Valorisables</dt><dd>${palTable()[state.level].val.join(", ")}</dd>
     ${state.app === "poutre" ? `<dt>Durée</dt><dd>${DUREE.poutre[lvlKey]}</dd>` : ""}
@@ -616,8 +755,8 @@ function renderNote() {
     ${state.app === "barres" && lvlKey !== "C" ? `<dt>Parties</dt><dd>${DUREE.barres[lvlKey]}</dd>` : ""}
     <dt>LA / LAE</dt><dd>éléments acrobatiques liés directement, sans pas ni sursaut ; LAE = tous avec envol, salti appel 2 pieds</dd>
     ${state.app !== "barres" ? `<dt>LG / LM</dt><dd>LG : 2 éléments gymniques différents (sauts, pivots) ; LM (poutre) : 1 gymnique + 1 acro. Tous dans les paliers valorisables.</dd>` : ""}
-  </dl></div>
-  <p class="note-foot">Note de départ calculée d'après le Programme Technique GAF UFOLEP du 29/09/2026 (outil non officiel). Le bonus prévu par le programme n'est pas encore détaillé dans la brochure et n'est pas compté. Le jury reste seul juge.</p>
+    <dt>À savoir</dt><dd>Calcul d'après le programme technique UFOLEP de sept. 2026 (outil non officiel). Le bonus n'est pas compté. Le jury reste seul juge.</dd>
+  </dl></details>
   </div>`;
   $("#pane-note").innerHTML = html;
   $("#scorePill").innerHTML = `${fmt(ev.nd)} <small>/ ${ev.ndMax}</small>`;
@@ -914,12 +1053,19 @@ document.addEventListener("click", async (e) => {
     const back = state.fromReq || $("#detail")._req; state.detail = null; state.fromReq = null;
     render(); toast(`Ajouté : ${BY_ID[id].name.slice(0, 40)}`); openReqDetail(back); return;
   }
+  else if (ds.padd) {
+    const [a, b2, link] = ds.padd.split(":"); const prev = d.items.at(-1);
+    d.items.push({ id: a, link: "none", bar: prev?.bar || "BI" }, { id: b2, link, bar: prev?.bar || "BI" });
+    const back = $("#detail")._req; state.detail = null; state.fromReq = null;
+    render(); toast(`Ajoutés : ${short(BY_ID[a])} ${link === "direct" ? "↔" : "+"} ${short(BY_ID[b2])}`); openReqDetail(back); return;
+  }
   else if (ds.detail) { e.preventDefault(); state.fromReq = b.closest("#detail") ? $("#detail")._req || null : null; state.sgLink = ds.sglink || null; state.detail = ds.detail; state.detailPos = ds.pos != null ? Number(ds.pos) : null; renderDetail(); return; }
   else if ("archePick" in ds) { F().arche = ds.archePick; F().side = ""; F().kind = ""; }
   else if (ds.fpal) { const a = F().pal; a.includes(ds.fpal) ? a.splice(a.indexOf(ds.fpal), 1) : a.push(ds.fpal); }
   else if (ds.fkind) F().kind = F().kind === ds.fkind ? "" : ds.fkind;
   else if (ds.fside) F().side = F().side === ds.fside ? "" : ds.fside;
   else if (ds.fflag) { const a = F().flags; a.includes(ds.fflag) ? a.splice(a.indexOf(ds.fflag), 1) : a.push(ds.fflag); }
+  else if (ds.act === "rename") state.renaming = !state.renaming;
   else if (ds.act === "clearf") { Object.assign(F(), { pal: [], kind: "", side: "", flags: [] }); state.q = ""; }
   else if (ds.catview) state.catView = ds.catview;
   else if (ds.zoom) state.zoom = Math.min(2.5, Math.max(1, (state.zoom || 1) + Number(ds.zoom) * 0.5));
